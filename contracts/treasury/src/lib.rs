@@ -39,6 +39,7 @@ pub enum Error {
     ExceedsMonthlyLimit = 15,
     ExceedsDepositCap = 16,
     PayeeOutsideTaskBudget = 17,
+    ExceedsRepPayeeCap = 18,
 }
 
 #[contracttype]
@@ -118,6 +119,9 @@ pub enum DataKey {
     PayeeSpent(Address, u32),
     /// The payees the current Leash may pay. Empty / absent = any approved payee.
     SessionPayees,
+    /// Monthly ceiling for a payee admitted via the reputation gate rather than the manual
+    /// whitelist (0 / absent = no separate reputation cap). Closes SECURITY.md M4.
+    RepPayeeCap,
 }
 
 /// Minimal reputation-oracle interface Eunomia reads to authorize a *non-whitelisted*
@@ -389,6 +393,33 @@ impl Treasury {
         env.storage()
             .persistent()
             .get(&DataKey::PayeeCap(payee))
+            .unwrap_or(0)
+    }
+
+    /// Most a reputation-admitted (non-whitelisted) payee may receive per UTC calendar month
+    /// (SECURITY M4). Admin-only; 0 removes the separate cap. Whitelisted payees are
+    /// unaffected even when a reputation gate is also configured.
+    pub fn set_rep_payee_cap(env: Env, cap: i128) -> Result<(), Error> {
+        let cfg = Self::cfg(&env);
+        cfg.admin.require_auth();
+        Self::bump_instance(&env);
+        if cap < 0 {
+            return Err(Error::InvalidLimits);
+        }
+        if cap == 0 {
+            env.storage().instance().remove(&DataKey::RepPayeeCap);
+        } else {
+            env.storage().instance().set(&DataKey::RepPayeeCap, &cap);
+        }
+        env.events().publish((symbol_short!("rep_cap"),), cap);
+        Ok(())
+    }
+
+    /// The monthly cap for reputation-admitted payees, or 0 when unset.
+    pub fn rep_payee_cap(env: Env) -> i128 {
+        env.storage()
+            .instance()
+            .get(&DataKey::RepPayeeCap)
             .unwrap_or(0)
     }
 
@@ -947,6 +978,12 @@ impl Treasury {
     /// spend belongs to so the caller records it under the same key it was checked against.
     fn check_month_limits(env: &Env, to: &Address, amount: i128) -> Result<u32, Error> {
         let month = month_of(env.ledger().timestamp());
+        if !Self::is_payee(env.clone(), to.clone()) {
+            let rep_cap = Self::rep_payee_cap(env.clone());
+            if rep_cap > 0 && Self::payee_spent(env.clone(), to.clone(), month) + amount > rep_cap {
+                return Err(Error::ExceedsRepPayeeCap);
+            }
+        }
         let cap = Self::payee_cap(env.clone(), to.clone());
         if cap > 0 && Self::payee_spent(env.clone(), to.clone(), month) + amount > cap {
             return Err(Error::ExceedsPayeeCap);

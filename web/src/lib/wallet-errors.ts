@@ -83,6 +83,7 @@ export const CONTRACT_ERRORS: Record<number, string> = {
   15: "Over this month's budget — the payment never left the treasury.",
   16: "That would take the treasury over its deposit cap — this beta holds a limited amount per treasury.",
   17: "Outside the task budget — this agent may only pay the payees the owner approved for the task.",
+  18: "Over the reputation-admitted payee cap — the payment never left the treasury.",
 };
 
 /** Parse a contract guardrail rejection out of a raw error message. Returns null

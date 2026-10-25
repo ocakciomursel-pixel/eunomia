@@ -21,6 +21,7 @@ const DETAILS: Record<number, string> = {
   15: "amount exceeds what is left of this month's budget",
   16: "deposit would take the treasury over its deposit cap",
   17: "the Leash is a task budget and this payee is not one it names — ask the owner for a budget that includes it",
+  18: "amount exceeds what is left of the cap for reputation-admitted payees",
 };
 
 /** Codes the token contract raises from inside pay(), not the treasury's policy. They reach

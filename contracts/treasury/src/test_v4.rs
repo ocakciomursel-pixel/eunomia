@@ -100,6 +100,7 @@ fn v4_error_codes_are_stable() {
     assert_eq!(Error::ExceedsMonthlyLimit as u32, 15);
     assert_eq!(Error::ExceedsDepositCap as u32, 16);
     assert_eq!(Error::PayeeOutsideTaskBudget as u32, 17);
+    assert_eq!(Error::ExceedsRepPayeeCap as u32, 18);
 }
 
 // ---- monthly limit -----------------------------------------------------------------
@@ -521,4 +522,62 @@ fn admin_signs_the_v4_setters() {
     let auths = env.auths();
     assert_eq!(auths.len(), 1);
     assert_eq!(auths[0].0, t.admin);
+}
+
+
+// ---- reputation-admitted payee cap (SECURITY M4) -----------------------------------
+
+#[test]
+fn rep_payee_cap_bounds_reputation_admitted_payees_and_leaves_whitelisted_alone() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let t = world(&env, 0);
+    let whitelisted = approved(&t);
+
+    let rep_id = env.register(crate::test::MockReputation, ());
+    let rep = crate::test::MockReputationClient::new(&env, &rep_id);
+    let rep_payee = Address::generate(&env);
+    rep.set_score(&rep_payee, &80_i128);
+
+    t.client.set_reputation_policy(&rep_id, &50_i128);
+    t.client.set_rep_payee_cap(&30_i128);
+    assert_eq!(t.client.rep_payee_cap(), 30_i128);
+
+    // Under the cap passes for a reputation-admitted payee.
+    t.client.pay(&1, &rep_payee, &20_i128);
+    assert_eq!(t.token.balance(&rep_payee), 20_i128);
+
+    // Over the cap (single payment or cumulative in the month) is refused with #18.
+    assert_eq!(
+        t.client.try_pay(&2, &rep_payee, &15_i128),
+        Err(Ok(Error::ExceedsRepPayeeCap))
+    );
+    let deadline = env.ledger().timestamp() + 3_600;
+    assert_eq!(
+        t.client.try_create_escrow(&3, &rep_payee, &15_i128, &deadline),
+        Err(Ok(Error::ExceedsRepPayeeCap))
+    );
+
+    // Escrow under the remaining cap passes.
+    t.client.create_escrow(&4, &rep_payee, &10_i128, &deadline);
+
+    // A whitelisted payee is unaffected even when the reputation gate and cap are active.
+    t.client.pay(&5, &whitelisted, &100_i128);
+    assert_eq!(t.token.balance(&whitelisted), 100_i128);
+
+    // Clearing the cap with 0 lifts the extra ceiling; rejecting negative values.
+    assert_eq!(t.client.try_set_rep_payee_cap(&-1_i128), Err(Ok(Error::InvalidLimits)));
+    t.client.set_rep_payee_cap(&0_i128);
+    assert_eq!(t.client.rep_payee_cap(), 0_i128);
+    t.client.pay(&6, &rep_payee, &50_i128);
+}
+
+#[test]
+#[should_panic]
+fn set_rep_payee_cap_is_admin_only() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let t = world(&env, 0);
+    only_agent_signs(&t, "set_rep_payee_cap", (25_i128,).into_val(&env));
+    t.client.set_rep_payee_cap(&25_i128);
 }

@@ -12,8 +12,14 @@ test("contractCodeFromMessage reads the host's Error(Contract, #N) out of any me
 
 test("reasonFromCode / reasonFromErrorName use the binding's names", () => {
   assert.deepEqual(reasonFromCode(3), { code: 3, name: "ExceedsTaskLimit", detail: "amount exceeds the per-payment cap" });
+  assert.deepEqual(reasonFromCode(18), {
+    code: 18,
+    name: "ExceedsRepPayeeCap",
+    detail: "amount exceeds what is left of the cap for reputation-admitted payees",
+  });
   assert.equal(reasonFromCode(99).name, "ContractError99");
   assert.equal(reasonFromErrorName("PayeeNotWhitelisted")?.code, 2);
+  assert.equal(reasonFromErrorName("ExceedsRepPayeeCap")?.code, 18);
   assert.equal(reasonFromErrorName("Nope"), null);
 });
 
