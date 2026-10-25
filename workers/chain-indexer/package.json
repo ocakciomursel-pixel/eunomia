@@ -6,7 +6,8 @@
     "dev": "wrangler dev --test-scheduled",
     "deploy": "wrangler deploy",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check:config": "node scripts/check-config.mjs"
   },
   "dependencies": {
     "@stellar/stellar-base": "^14.1.0"

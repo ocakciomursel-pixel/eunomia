@@ -20,13 +20,25 @@ export interface Env {
 }
 
 const PAGE_LIMIT = 500;
-const MAX_PAGES = 40; // per run; a backlog drains over the next runs
+// Bounded so one cron invocation stays below the Cloudflare Workers Free plan 50-subrequest
+// limit: 3 initial requests (knownTreasuries, loadCursor, getHealth) + 10 pages * up to 4
+// requests (getEvents, chain_treasuries, chain_events, chain_cursor) = at most 43 subrequests.
+export const MAX_PAGES = 10;
+
+const RPC_MAX_ATTEMPTS = 3;
+const RPC_BASE_DELAY_MS = 200;
 
 interface EventsPage {
   events: RpcEvent[];
   cursor?: string;
   latestLedger: number;
 }
+
+export interface RunOptions {
+  sleep?: (ms: number) => Promise<void>;
+}
+
+const defaultSleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 /** The ledger a getEvents paging cursor points at (TOID's high 32 bits); 0 if unparsable. */
 export function cursorLedger(cursor: string | null | undefined): number {
@@ -35,15 +47,47 @@ export function cursorLedger(cursor: string | null | undefined): number {
   return Number(BigInt(toid) >> 32n);
 }
 
-async function rpc<T>(env: Env, method: string, params: unknown): Promise<T> {
-  const res = await fetch(env.RPC_URL, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-  });
-  const body = (await res.json()) as { result?: T; error?: { message: string } };
-  if (body.error || !body.result) throw new Error(`${method}: ${body.error?.message ?? res.status}`);
-  return body.result;
+export async function rpc<T>(
+  env: Env,
+  method: string,
+  params: unknown,
+  sleep: (ms: number) => Promise<void> = defaultSleep,
+): Promise<T> {
+  let lastErr: Error | undefined;
+  for (let attempt = 0; attempt < RPC_MAX_ATTEMPTS; attempt++) {
+    if (attempt > 0) {
+      await sleep(RPC_BASE_DELAY_MS * 2 ** (attempt - 1));
+    }
+    let res: Response;
+    try {
+      res = await fetch(env.RPC_URL, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+      });
+    } catch (err) {
+      lastErr = err instanceof Error ? err : new Error(String(err));
+      continue;
+    }
+    if (!res.ok) {
+      const text = (await res.text()).slice(0, 200).trim();
+      lastErr = new Error(`${method}: HTTP ${res.status}${text ? ` ${text}` : ""}`);
+      if (res.status === 429 || res.status >= 500) continue;
+      throw lastErr;
+    }
+    let body: { result?: T; error?: { message: string } };
+    try {
+      body = (await res.json()) as { result?: T; error?: { message: string } };
+    } catch {
+      lastErr = new Error(`${method}: invalid JSON response`);
+      continue;
+    }
+    if (body.error || !body.result) {
+      throw new Error(`${method}: ${body.error?.message ?? res.status}`);
+    }
+    return body.result;
+  }
+  throw lastErr ?? new Error(`${method}: failed after ${RPC_MAX_ATTEMPTS} attempts`);
 }
 
 /** Topic filters: the registry's `regd`, and treasury topics from any contract (narrowed to
@@ -96,15 +140,21 @@ async function loadCursor(env: Env): Promise<string | null> {
   return rows[0]?.cursor ?? null;
 }
 
-export async function run(env: Env): Promise<{ pages: number; registrations: number; events: number }> {
+export async function run(
+  env: Env,
+  options: RunOptions = {},
+): Promise<{ pages: number; registrations: number; events: number }> {
   // Set at deploy (wrangler.jsonc). Without them a run would fail somewhere less legible.
   if (!env.RPC_URL || !env.REGISTRY_ID) throw new Error("RPC_URL and REGISTRY_ID must be set");
+  const sleep = options.sleep ?? defaultSleep;
   const known = await knownTreasuries(env);
   let cursor = await loadCursor(env);
+  const health = await rpc<{ oldestLedger: number }>(env, "getHealth", {}, sleep);
   let startLedger: number | undefined;
-  if (!cursor) {
-    // First run: start at the oldest ledger the RPC still retains.
-    const health = await rpc<{ oldestLedger: number }>(env, "getHealth", {});
+  // First run or stale cursor (older than the RPC's ~7-day retention window): fall back to
+  // the oldest retained ledger so paging resumes instead of failing permanently.
+  if (!cursor || cursorLedger(cursor) <= health.oldestLedger) {
+    cursor = null;
     startLedger = health.oldestLedger + 1;
   }
 
@@ -113,11 +163,16 @@ export async function run(env: Env): Promise<{ pages: number; registrations: num
   let stored = 0;
   let latestLedger = 0;
   for (; pages < MAX_PAGES; pages++) {
-    const page = await rpc<EventsPage>(env, "getEvents", {
-      ...(cursor ? {} : { startLedger }),
-      filters: filters(env),
-      pagination: cursor ? { cursor, limit: PAGE_LIMIT } : { limit: PAGE_LIMIT },
-    });
+    const page = await rpc<EventsPage>(
+      env,
+      "getEvents",
+      {
+        ...(cursor ? {} : { startLedger }),
+        filters: filters(env),
+        pagination: cursor ? { cursor, limit: PAGE_LIMIT } : { limit: PAGE_LIMIT },
+      },
+      sleep,
+    );
     latestLedger = page.latestLedger;
 
     const regs = page.events.flatMap((e) => {
@@ -150,7 +205,7 @@ export async function run(env: Env): Promise<{ pages: number; registrations: num
     // once the cursor has reached the head (or stopped moving).
     if (!advanced || cursorLedger(cursor) >= latestLedger) break;
   }
-  return { pages: pages + 1, registrations, events: stored };
+  return { pages: Math.min(pages + 1, MAX_PAGES), registrations, events: stored };
 }
 
 export default {
