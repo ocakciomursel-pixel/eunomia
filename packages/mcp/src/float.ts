@@ -7,7 +7,7 @@
 // the top-up is an ordinary treasury pay() (every on-chain limit applies), the owner can put
 // a monthly payee cap on the agent's own address, and sweep_float returns what a task did
 // not spend. call.ts adds the per-call checks before anything is signed.
-import { Account, Address, BASE_FEE, Contract, Operation, TransactionBuilder, nativeToScVal, rpc, scValToNative } from "@stellar/stellar-sdk";
+import { Account, Address, Asset, BASE_FEE, Contract, Operation, TransactionBuilder, nativeToScVal, rpc, scValToNative } from "@stellar/stellar-sdk";
 import { NULL_ACCOUNT } from "@stellar/stellar-sdk/contract";
 import type { NetworkConfig } from "./network.js";
 import { payFromTreasury, requireTreasury, type PayDeps, type PayOutcome } from "./pay.js";
@@ -35,7 +35,8 @@ export async function tokenBalance(
 
 export async function treasuryToken(ctx: ServerContext): Promise<string> {
   const id = requireTreasury(ctx);
-  return (await makeClient(ctx.net, id).get_config()).result.token;
+  const client = (ctx.deps?.makeClient ?? makeClient)(ctx.net, id);
+  return (await client.get_config()).result.token;
 }
 
 /** Top the float up from the treasury: an ordinary pay() to the agent's own address, so the
@@ -57,22 +58,30 @@ export interface SweepResult {
   status: "SUCCESS" | "FAILED" | "NOTHING";
 }
 
+export interface SweepDeps {
+  server?: rpc.Server;
+  poll?: typeof pollTransaction;
+  token?: string;
+  asset?: Asset | null;
+}
+
 /** Return float to the treasury: a token transfer from the agent's account, signed by the
  *  agent. `amount` defaults to everything the account holds of the treasury's token. */
 export async function sweepFloat(
   ctx: ServerContext,
   amount?: bigint,
-  deps: { server?: rpc.Server; poll?: typeof pollTransaction } = {},
+  deps: SweepDeps = {},
 ): Promise<SweepResult> {
   const treasury = requireTreasury(ctx);
   if (!ctx.credential) throw new Error("No agent credential — run `eunomia-mcp init` first.");
   const server = deps.server ?? new rpc.Server(ctx.net.rpcUrl);
   const kp = agentKeypair(ctx.credential);
-  const token = await treasuryToken(ctx);
+  const token = deps.token ?? (await treasuryToken(ctx));
   const held = await tokenBalance(ctx.net, token, kp.publicKey(), server);
   // On an XLM treasury the float sits in the same balance as the account's own XLM (its
   // reserve and fee money), so "everything" would empty the account. Name the amount there.
-  if (amount === undefined && (await readTokenAsset(ctx.net, token, server))?.isNative()) {
+  const asset = deps.asset !== undefined ? deps.asset : await readTokenAsset(ctx.net, token, server);
+  if (amount === undefined && asset?.isNative()) {
     throw new Error("this treasury holds XLM, which the agent's account also lives on — give the amount to return");
   }
   const swept = amount ?? held;
@@ -108,23 +117,33 @@ export async function sweepFloat(
   };
 }
 
+export interface TrustlineDeps {
+  server?: rpc.Server;
+  token?: string;
+  asset?: Asset | null;
+  lacks?: typeof lacksTrustline;
+  submit?: typeof submitClassic;
+}
+
 /** Let the agent's account hold the treasury's token: a classic trustline, needed once on
  *  mainnet before a USDC float can be funded (a G… account holds an issued asset only once
  *  it trusts the issuer). Signed by the agent; the account must already hold XLM for the
  *  reserve. Nothing to do for the native asset. */
 export async function addTrustline(
   ctx: ServerContext,
-  deps: { server?: rpc.Server } = {},
+  deps: TrustlineDeps = {},
 ): Promise<{ asset: string; txHash: string | null; status: "SUCCESS" | "FAILED" | "NOT_NEEDED" }> {
   if (!ctx.credential) throw new Error("No agent credential — run `eunomia-mcp init` first.");
   const server = deps.server ?? new rpc.Server(ctx.net.rpcUrl);
-  const token = await treasuryToken(ctx);
-  const asset = await readTokenAsset(ctx.net, token, server);
+  const token = deps.token ?? (await treasuryToken(ctx));
+  const asset = deps.asset !== undefined ? deps.asset : await readTokenAsset(ctx.net, token, server);
   if (!asset || asset.isNative()) return { asset: asset ? "XLM" : token, txHash: null, status: "NOT_NEEDED" };
   const kp = agentKeypair(ctx.credential);
-  if (!(await lacksTrustline(ctx.net, token, kp.publicKey(), server))) {
+  const checkLacks = deps.lacks ?? lacksTrustline;
+  if (!(await checkLacks(ctx.net, token, kp.publicKey(), server))) {
     return { asset: `${asset.getCode()}:${asset.getIssuer()}`, txHash: null, status: "NOT_NEEDED" };
   }
-  const r = await submitClassic(ctx.net, kp, [Operation.changeTrust({ asset })], { server });
+  const submit = deps.submit ?? submitClassic;
+  const r = await submit(ctx.net, kp, [Operation.changeTrust({ asset })], { server });
   return { asset: `${asset.getCode()}:${asset.getIssuer()}`, txHash: r.txHash, status: r.status };
 }

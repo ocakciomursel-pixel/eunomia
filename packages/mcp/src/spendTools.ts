@@ -4,17 +4,21 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { encodeBudgetRequest, MAX_REQUEST_HOURS, MAX_REQUEST_PAYEES, REQUEST_TTL_SEC } from "./budgetRequestCodec.js";
-import { callService } from "./call.js";
-import { searchServices } from "./catalog.js";
+import { callService as defaultCallService } from "./call.js";
+import { searchServices as defaultSearchServices } from "./catalog.js";
 import { isValidContractId } from "./credential.js";
 import { errText } from "./errors.js";
-import { fundFloat, sweepFloat, tokenBalance } from "./float.js";
+import {
+  fundFloat as defaultFundFloat,
+  sweepFloat as defaultSweepFloat,
+  tokenBalance as defaultTokenBalance,
+} from "./float.js";
 import { fromStroops, toStroops, txUrl } from "./format.js";
 import { TRUSTLINE_MISSING } from "./pay.js";
 import type { ServerContext } from "./server.js";
 import { agentKeypair } from "./signer.js";
-import { makeClient, readTreasury } from "./treasury.js";
-import { treasuryUnit } from "./unit.js";
+import { makeClient as defaultMakeClient, readTreasury as defaultReadTreasury } from "./treasury.js";
+import { treasuryUnit as defaultTreasuryUnit } from "./unit.js";
 import { serializeOutcome } from "./tools.js";
 
 type ToolResult = {
@@ -36,6 +40,14 @@ const ready = (ctx: ServerContext): string | null =>
 
 export function registerSpendTools(server: McpServer, ctx: ServerContext): void {
   const now = ctx.now ?? (() => Math.floor(Date.now() / 1000));
+  const searchServices = ctx.deps?.searchServices ?? defaultSearchServices;
+  const fundFloat = ctx.deps?.fundFloat ?? defaultFundFloat;
+  const callService = ctx.deps?.callService ?? defaultCallService;
+  const sweepFloat = ctx.deps?.sweepFloat ?? defaultSweepFloat;
+  const tokenBalance = ctx.deps?.tokenBalance ?? defaultTokenBalance;
+  const makeClient = ctx.deps?.makeClient ?? defaultMakeClient;
+  const readTreasury = ctx.deps?.readTreasury ?? defaultReadTreasury;
+  const treasuryUnit = ctx.deps?.treasuryUnit ?? defaultTreasuryUnit;
 
   server.registerTool(
     "find_services",

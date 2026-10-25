@@ -8,15 +8,28 @@ import { z } from "zod";
 import { computeBudget, type Budget } from "./budget.js";
 import { isValidContractId } from "./credential.js";
 import { errText, reasonFromCode } from "./errors.js";
-import { closeException, readExceptionEntry, submitException } from "./exception.js";
+import {
+  closeException as defaultCloseException,
+  readExceptionEntry as defaultReadExceptionEntry,
+  submitException as defaultSubmitException,
+} from "./exception.js";
 import { EXCEPTION_PREFIX, exceptionIdOf } from "./exceptionCodec.js";
 import { contractUrl, fromStroops, toStroops, txUrl, type NetworkName } from "./format.js";
-import { payFromTreasury, preflightReasons, TRUSTLINE_MISSING, type PayOutcome } from "./pay.js";
-import { lacksTrustline } from "./receiver.js";
-import { listAllowedPayees } from "./payees.js";
+import {
+  payFromTreasury as defaultPayFromTreasury,
+  preflightReasons as defaultPreflightReasons,
+  TRUSTLINE_MISSING,
+  type PayOutcome,
+} from "./pay.js";
+import { lacksTrustline as defaultLacksTrustline } from "./receiver.js";
+import { listAllowedPayees as defaultListAllowedPayees } from "./payees.js";
 import type { ServerContext } from "./server.js";
-import { isPayee, makeClient, readTreasury } from "./treasury.js";
-import { treasuryUnit } from "./unit.js";
+import {
+  isPayee as defaultIsPayee,
+  makeClient as defaultMakeClient,
+  readTreasury as defaultReadTreasury,
+} from "./treasury.js";
+import { treasuryUnit as defaultTreasuryUnit } from "./unit.js";
 import { checkRequirement, type PaymentRequirements } from "./x402.js";
 
 const amt = (v: bigint) => fromStroops(v);
@@ -145,6 +158,17 @@ const x402Schema = z
 
 export function registerTools(server: McpServer, ctx: ServerContext): void {
   const now = ctx.now ?? (() => Math.floor(Date.now() / 1000));
+  const makeClient = ctx.deps?.makeClient ?? defaultMakeClient;
+  const readTreasury = ctx.deps?.readTreasury ?? defaultReadTreasury;
+  const isPayee = ctx.deps?.isPayee ?? defaultIsPayee;
+  const treasuryUnit = ctx.deps?.treasuryUnit ?? defaultTreasuryUnit;
+  const listAllowedPayees = ctx.deps?.listAllowedPayees ?? defaultListAllowedPayees;
+  const lacksTrustline = ctx.deps?.lacksTrustline ?? defaultLacksTrustline;
+  const payFromTreasury = ctx.deps?.payFromTreasury ?? defaultPayFromTreasury;
+  const preflightReasons = ctx.deps?.preflightReasons ?? defaultPreflightReasons;
+  const submitException = ctx.deps?.submitException ?? defaultSubmitException;
+  const readExceptionEntry = ctx.deps?.readExceptionEntry ?? defaultReadExceptionEntry;
+  const closeException = ctx.deps?.closeException ?? defaultCloseException;
 
   server.registerTool(
     "check_budget",

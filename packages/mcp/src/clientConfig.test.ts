@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { configPath, mergeServer, serverEntry } from "./clientConfig.js";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { configPath, mergeServer, serverEntry, writeClientConfig } from "./clientConfig.js";
 
 const ENV = { EUNOMIA_TREASURY: "CTREASURY", EUNOMIA_NETWORK: "pubnet" };
 
@@ -37,4 +40,34 @@ test("each client's config lives where the client reads it", () => {
 test("the agent's secret never goes into a client config", () => {
   const entry = serverEntry(ENV, "linux");
   assert.ok(!JSON.stringify(entry).includes("SECRET"));
+});
+
+test("writeClientConfig writes fresh files, preserves .bak on overwrite, and invokes claude-code", () => {
+  const home = mkdtempSync(join(tmpdir(), "eunomia-cfg-write-"));
+  try {
+    const first = writeClientConfig("cursor", ENV, { home, platform: "linux" });
+    assert.equal(first.backup, undefined);
+    const parsed1 = JSON.parse(readFileSync(first.where, "utf8"));
+    assert.deepEqual(parsed1.mcpServers.eunomia, { command: "npx", args: ["-y", "eunomia-mcp"], env: ENV });
+
+    writeFileSync(first.where, JSON.stringify({ mcpServers: { existing: { command: "foo", args: [] } } }));
+    const second = writeClientConfig("cursor", ENV, { home, platform: "linux" });
+    assert.equal(second.backup, `${first.where}.bak`);
+    const parsed2 = JSON.parse(readFileSync(second.where, "utf8"));
+    assert.ok(parsed2.mcpServers.existing);
+    assert.ok(parsed2.mcpServers.eunomia);
+
+    let spawned: { file: string; args: readonly string[] } | undefined;
+    const codeRes = writeClientConfig("claude-code", ENV, {
+      platform: "linux",
+      exec: (file, args) => {
+        spawned = { file, args };
+      },
+    });
+    assert.equal(codeRes.client, "claude-code");
+    assert.equal(spawned?.file, "claude");
+    assert.ok(spawned?.args.includes("eunomia-mcp"));
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
 });

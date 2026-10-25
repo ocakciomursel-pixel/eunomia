@@ -59,18 +59,35 @@ export interface WriteResult {
   backup?: string;
 }
 
-export function writeClientConfig(client: ClientName, env: Record<string, string>): WriteResult {
+export interface WriteClientOptions {
+  platform?: NodeJS.Platform;
+  env?: NodeJS.ProcessEnv;
+  home?: string;
+  exec?: (file: string, args: readonly string[]) => void;
+}
+
+export function writeClientConfig(
+  client: ClientName,
+  env: Record<string, string>,
+  options: WriteClientOptions = {},
+): WriteResult {
+  const platform = options.platform ?? process.platform;
   if (client === "claude-code") {
     // Claude Code owns its config; `claude mcp add` is the supported way in.
     const args = ["mcp", "add", "--scope", "user", "eunomia"];
     for (const [k, v] of Object.entries(env)) args.push("-e", `${k}=${v}`);
     args.push("--", "npx", "-y", "eunomia-mcp");
-    execFileSync(process.platform === "win32" ? "claude.cmd" : "claude", args, { stdio: "ignore" });
+    const cmd = platform === "win32" ? "claude.cmd" : "claude";
+    if (options.exec) {
+      options.exec(cmd, args);
+    } else {
+      execFileSync(cmd, args, { stdio: "ignore" });
+    }
     return { client, where: `claude ${args.join(" ")}` };
   }
-  const path = configPath(client);
+  const path = configPath(client, platform, options.env, options.home);
   const existing = existsSync(path) ? readFileSync(path, "utf8") : null;
-  const next = mergeServer(existing, serverEntry(env));
+  const next = mergeServer(existing, serverEntry(env, platform));
   mkdirSync(dirname(path), { recursive: true });
   let backup: string | undefined;
   if (existing !== null) {
