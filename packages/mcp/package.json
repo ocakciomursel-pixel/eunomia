@@ -39,7 +39,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "node --import tsx --test src/*.test.ts",
+    "test": "node --import tsx --test \"src/*.test.ts\"",
     "smoke": "tsx scripts/client-smoke.ts",
     "sync:bindings": "node scripts/same.mjs --write ../treasury-client/src/index.ts src/bindings/treasury.ts",
     "check:bindings": "node scripts/same.mjs ../treasury-client/src/index.ts src/bindings/treasury.ts",

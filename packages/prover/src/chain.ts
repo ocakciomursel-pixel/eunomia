@@ -21,6 +21,8 @@ export interface PeriodPayment {
   closedAt: string;
 }
 
+export type RpcEventsServer = Pick<rpc.Server, "getLatestLedger" | "getEvents">;
+
 const PAID = xdr.ScVal.scvSymbol("paid").toXDR("base64");
 
 /** Every `paid` event of `treasury` whose ledger closed inside UTC day `periodId`. */
@@ -28,8 +30,8 @@ export async function readPeriodPayments(
   rpcUrl: string,
   treasury: string,
   periodId: number,
+  server: RpcEventsServer = new rpc.Server(rpcUrl),
 ): Promise<PeriodPayment[]> {
-  const server = new rpc.Server(rpcUrl);
   const latest = (await server.getLatestLedger()).sequence;
   const dayStart = periodId * SECONDS_PER_DAY;
   const dayEnd = dayStart + SECONDS_PER_DAY;

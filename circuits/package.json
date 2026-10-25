@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "mocha --import=tsx test/**/*.test.ts --timeout 180000"
+    "test": "mocha --import=tsx \"test/**/*.test.ts\" --timeout 180000"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.7",
