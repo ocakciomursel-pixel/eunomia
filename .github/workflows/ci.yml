@@ -114,9 +114,29 @@ jobs:
       # …and the budget request links the agent signs, read by the Agent page.
       - name: mcp — budget request codec copy in web in sync
         run: cmp packages/mcp/src/budgetRequestCodec.ts web/src/lib/budgetRequestCodec.ts
-      - name: mcp — unit tests + build
+
+  mcp:
+    name: MCP (${{ matrix.os }}, node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Install dependencies
         working-directory: packages/mcp
-        run: |
-          npm install
-          npm test
-          npm run build
+        run: npm install
+      - name: Vendored bindings and codecs in sync
+        working-directory: packages/mcp
+        run: npm run check:bindings && npm run check:codec
+      - name: Unit tests
+        working-directory: packages/mcp
+        run: npm test
+      - name: Build
+        working-directory: packages/mcp
+        run: npm run build
