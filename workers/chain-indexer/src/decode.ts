@@ -23,6 +23,7 @@ export interface EventRow {
   kind: string;
   counterparty: string | null;
   amount: string | null;
+  detail: Record<string, unknown> | null;
 }
 
 export interface Registration {
@@ -47,6 +48,8 @@ export const TREASURY_KINDS = [
   "payee_rm",
   "paused",
   "agent",
+  "rep_gate",
+  "wl_root",
   // v4
   "deposit",
   "monthly",
@@ -59,6 +62,13 @@ const decode = (b64: string): unknown => scValToNative(xdr.ScVal.fromXDR(b64, "b
 export const symbolTopic = (name: string): string => xdr.ScVal.scvSymbol(name).toXDR("base64");
 
 const str = (v: unknown): string | null => (v === undefined || v === null ? null : String(v));
+
+const hex = (v: unknown): string => {
+  if (v instanceof Uint8Array) {
+    return Array.from(v, (b) => b.toString(16).padStart(2, "0")).join("");
+  }
+  return String(v ?? "");
+};
 
 /** The registry's `regd` event: topics (regd, owner), value treasury. Null for anything else. */
 export function toRegistration(e: RpcEvent, network: string): Registration | null {
@@ -74,15 +84,17 @@ export function toRegistration(e: RpcEvent, network: string): Registration | nul
 
 /** A treasury event as a stored row. Payloads are tuples whose first element is the address
  *  the event is about and, where present, the second is the amount — except `session`
- *  (agent, valid_until, limit) and `limits` (daily, per_task), and the v4 events, which put
- *  their address in the second topic: `deposit` (from) -> amount, `payee_cap` (payee) -> cap,
- *  `budget` (agent) -> (valid_until, limit, payees), and `monthly` -> limit. */
+ *  (agent, valid_until, limit), `limits` (daily, per_task), `paused` (bool), `wl_root`
+ *  (BytesN<32>), and the v4 events, which put their address in the second topic: `deposit`
+ *  (from) -> amount, `payee_cap` (payee) -> cap, `budget` (agent) -> (valid_until, limit,
+ *  payees), and `monthly` -> limit. */
 export function toEventRow(e: RpcEvent, network: string): EventRow {
   const kind = String(decode(e.topic[0]));
   const value = decode(e.value);
   const tuple = Array.isArray(value) ? value : [value];
   let counterparty: string | null = null;
   let amount: string | null = null;
+  let detail: Record<string, unknown> | null = null;
   switch (kind) {
     case "session":
       counterparty = str(tuple[0]);
@@ -90,6 +102,7 @@ export function toEventRow(e: RpcEvent, network: string): EventRow {
       break;
     case "limits":
       amount = str(tuple[0]); // daily limit
+      detail = { per_task: str(tuple[1]) };
       break;
     case "monthly":
       amount = str(tuple[0]);
@@ -102,8 +115,17 @@ export function toEventRow(e: RpcEvent, network: string): EventRow {
     case "budget":
       counterparty = e.topic[1] ? str(decode(e.topic[1])) : null;
       amount = str(tuple[1]); // the budget's cap
+      detail = {
+        valid_until: Number(tuple[0]),
+        payees: Array.isArray(tuple[2]) ? tuple[2].map(String) : [],
+      };
       break;
     case "paused":
+      detail = { paused: Boolean(tuple[0]) };
+      break;
+    case "wl_root":
+      detail = { root: hex(tuple[0]) };
+      break;
     case "revoked":
       break;
     default:
@@ -120,5 +142,6 @@ export function toEventRow(e: RpcEvent, network: string): EventRow {
     kind,
     counterparty,
     amount,
+    detail,
   };
 }

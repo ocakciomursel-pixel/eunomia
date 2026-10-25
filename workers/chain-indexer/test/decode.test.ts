@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Address, nativeToScVal, xdr } from "@stellar/stellar-base";
-import { toEventRow, toRegistration, type RpcEvent } from "../src/decode";
+import { TREASURY_KINDS, toEventRow, toRegistration, type RpcEvent } from "../src/decode";
 
 const OWNER = "GCB32DDRIOE24JJ66IYB2V44UAYYPRA4UIPGQKM2OINHDK2NPW365XTA";
 const TREASURY = "CADUYW6CJ7QYEL5QMFT43YBOT2QJ2LBEA34UYHJYMHWQQUNUADGNP7QO";
@@ -39,7 +39,13 @@ describe("toEventRow", () => {
   it("paid: (paid, task_id) -> (to, amount)", () => {
     const value = xdr.ScVal.scvVec([addr(OWNER), i128(50_000_000n)]);
     const row = toEventRow(event([sym("paid"), b64(nativeToScVal(7n, { type: "u64" }))], value), "mainnet");
-    expect(row).toMatchObject({ kind: "paid", counterparty: OWNER, amount: "50000000", contract_id: TREASURY });
+    expect(row).toMatchObject({
+      kind: "paid",
+      counterparty: OWNER,
+      amount: "50000000",
+      contract_id: TREASURY,
+      detail: null,
+    });
   });
 
   it("session: (agent, valid_until, limit) keeps the agent and the limit", () => {
@@ -48,6 +54,17 @@ describe("toEventRow", () => {
       kind: "session",
       counterparty: OWNER,
       amount: "10000000",
+      detail: null,
+    });
+  });
+
+  it("limits: (daily, per_task) stores daily in amount and per_task in detail", () => {
+    const value = xdr.ScVal.scvVec([i128(100_000_000n), i128(25_000_000n)]);
+    expect(toEventRow(event([sym("limits")], value), "mainnet")).toMatchObject({
+      kind: "limits",
+      counterparty: null,
+      amount: "100000000",
+      detail: { per_task: "25000000" },
     });
   });
 
@@ -56,6 +73,30 @@ describe("toEventRow", () => {
       kind: "payee_add",
       counterparty: OWNER,
       amount: null,
+      detail: null,
+    });
+  });
+
+  it("rep_gate: (registry, min_reputation) keeps the registry address and threshold", () => {
+    expect(TREASURY_KINDS).toContain("rep_gate");
+    const value = xdr.ScVal.scvVec([addr(TREASURY), i128(80n)]);
+    expect(toEventRow(event([sym("rep_gate")], value), "mainnet")).toMatchObject({
+      kind: "rep_gate",
+      counterparty: TREASURY,
+      amount: "80",
+      detail: null,
+    });
+  });
+
+  it("wl_root: BytesN<32> stores the hex Merkle root in detail", () => {
+    expect(TREASURY_KINDS).toContain("wl_root");
+    const rootBytes = new Uint8Array(32).fill(0xab);
+    const value = xdr.ScVal.scvBytes(rootBytes);
+    expect(toEventRow(event([sym("wl_root")], value), "mainnet")).toMatchObject({
+      kind: "wl_root",
+      counterparty: null,
+      amount: null,
+      detail: { root: "ab".repeat(32) },
     });
   });
 
@@ -64,6 +105,7 @@ describe("toEventRow", () => {
       kind: "deposit",
       counterparty: OWNER,
       amount: "250000000",
+      detail: null,
     });
   });
 
@@ -72,32 +114,45 @@ describe("toEventRow", () => {
       kind: "payee_cap",
       counterparty: OWNER,
       amount: "9",
+      detail: null,
     });
     expect(toEventRow(event([sym("monthly")], i128(7n)), "mainnet")).toMatchObject({
       kind: "monthly",
       counterparty: null,
       amount: "7",
+      detail: null,
     });
   });
 
-  it("v4 budget: (budget, agent) -> (valid_until, limit, payees) keeps the agent and the cap", () => {
+  it("v4 budget: (budget, agent) -> (valid_until, limit, payees) keeps the agent, cap, expiry and payees", () => {
     const value = xdr.ScVal.scvVec([
       nativeToScVal(1_800_000_000n, { type: "u64" }),
       i128(30_000_000n),
-      xdr.ScVal.scvVec([addr(TREASURY)]),
+      xdr.ScVal.scvVec([addr(TREASURY), addr(OWNER)]),
     ]);
     expect(toEventRow(event([sym("budget"), b64(addr(OWNER))], value), "mainnet")).toMatchObject({
       kind: "budget",
       counterparty: OWNER,
       amount: "30000000",
+      detail: {
+        valid_until: 1_800_000_000,
+        payees: [TREASURY, OWNER],
+      },
     });
   });
 
-  it("paused: no counterparty, no amount", () => {
+  it("paused: records whether the treasury was paused or resumed in detail", () => {
     expect(toEventRow(event([sym("paused")], xdr.ScVal.scvBool(true)), "mainnet")).toMatchObject({
       kind: "paused",
       counterparty: null,
       amount: null,
+      detail: { paused: true },
+    });
+    expect(toEventRow(event([sym("paused")], xdr.ScVal.scvBool(false)), "mainnet")).toMatchObject({
+      kind: "paused",
+      counterparty: null,
+      amount: null,
+      detail: { paused: false },
     });
   });
 });

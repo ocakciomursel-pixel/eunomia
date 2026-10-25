@@ -47,8 +47,8 @@ async function rpc<T>(env: Env, method: string, params: unknown): Promise<T> {
 }
 
 /** Topic filters: the registry's `regd`, and treasury topics from any contract (narrowed to
- *  known treasuries afterwards). RPC allows 5 filters of 5 topic patterns each — with the v4
- *  kinds that is every slot; a further kind needs a second request. */
+ *  known treasuries afterwards). RPC allows 5 filters of 5 topic patterns each — 1 filter for
+ *  the registry leaves 20 topic slots across the 4 treasury filters (19 of 20 used). */
 function filters(env: Env) {
   const any = (names: readonly string[]) => names.map((n) => [symbolTopic(n), "**"]);
   const kinds = [...TREASURY_KINDS];
