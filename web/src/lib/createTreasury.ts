@@ -101,7 +101,7 @@ export async function createTreasury(executor: TxExecutor, s: TreasurySetup): Pr
     signTransaction: executor.signer.signTransaction,
   }).create({ s: setup });
   // The treasury's address is known from simulation, so it survives either submit path.
-  const treasuryId = tx.result;
+  const treasuryId = typeof tx.result === "string" ? tx.result : tx.result.unwrap();
   await executor.submit(tx);
   return treasuryId;
 }

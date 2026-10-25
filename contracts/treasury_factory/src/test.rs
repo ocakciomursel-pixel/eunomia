@@ -361,11 +361,11 @@ fn a_token_the_factory_was_not_given_is_refused() {
     let w = world(&env);
     let mut s = setup(&w, None, 0, false);
     s.token = minted_token(&env, &w.owner);
-    assert!(w.factory.try_create(&s).is_err());
+    assert_eq!(w.factory.try_create(&s), Err(Ok(FactoryError::TokenNotAccepted)));
 }
 
 #[test]
-#[should_panic(expected = "at least one token")]
+#[should_panic(expected = "Error(Contract, #1)")]
 fn a_factory_needs_at_least_one_token() {
     let env = Env::default();
     let registry = env.register(REGISTRY_WASM, ());
@@ -374,7 +374,7 @@ fn a_factory_needs_at_least_one_token() {
 }
 
 #[test]
-#[should_panic(expected = "token listed twice")]
+#[should_panic(expected = "Error(Contract, #3)")]
 fn a_token_cannot_be_given_two_caps() {
     let env = Env::default();
     let registry = env.register(REGISTRY_WASM, ());
@@ -388,12 +388,32 @@ fn a_token_cannot_be_given_two_caps() {
 }
 
 #[test]
-#[should_panic(expected = "deposit cap must not be negative")]
+#[should_panic(expected = "Error(Contract, #2)")]
 fn a_negative_cap_is_refused_at_deploy() {
     let env = Env::default();
     let registry = env.register(REGISTRY_WASM, ());
     let caps = vec![&env, TokenCap { token: Address::generate(&env), cap: -1 }];
     env.register(TreasuryFactory, (treasury_wasm(&env), registry, caps));
+}
+
+#[test]
+fn create_rejects_negative_funding_and_multiple_leashes() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(1_800_000_000);
+    let w = world(&env);
+
+    let neg = setup(&w, None, -1, false);
+    assert_eq!(w.factory.try_create(&neg), Err(Ok(FactoryError::NegativeFund)));
+
+    let mut two_leashes = setup(&w, None, 0, false);
+    let l = Leash {
+        agent: Address::generate(&env),
+        valid_until: 1_800_086_400,
+        limit: 100,
+    };
+    two_leashes.leash = vec![&env, l.clone(), l];
+    assert_eq!(w.factory.try_create(&two_leashes), Err(Ok(FactoryError::TooManyLeashes)));
 }
 
 #[test]

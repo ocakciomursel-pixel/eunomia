@@ -19,9 +19,21 @@
 //! roughly six times apart in value; and a token without a cap is a token the factory
 //! refuses, so a treasury of some unknown asset cannot be created through it.
 use soroban_sdk::{
-    contract, contractclient, contractimpl, contracttype, symbol_short, Address, BytesN,
-    Env, Vec,
+    contract, contractclient, contracterror, contractimpl, contracttype, panic_with_error,
+    symbol_short, Address, BytesN, Env, Vec,
 };
+
+#[contracterror]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[repr(u32)]
+pub enum FactoryError {
+    NoTokens = 1,
+    NegativeDepositCap = 2,
+    DuplicateToken = 3,
+    TooManyLeashes = 4,
+    TokenNotAccepted = 5,
+    NegativeFund = 6,
+}
 
 /// A time-bound, spend-capped agent credential to start the treasury with (the Leash).
 #[contracttype]
@@ -60,7 +72,7 @@ pub struct Setup {
     /// (A `Vec` rather than an `Option`: the SDK's spec cannot carry an optional struct.)
     pub leash: Vec<Leash>,
     /// Amount of `token` deposited from the owner into the treasury (0 = unfunded). Refused
-    /// as a whole if it exceeds the token's deposit cap.
+    /// as a whole if negative or if it exceeds the token's deposit cap.
     pub fund: i128,
     /// Record the treasury under the owner in the registry (cross-device recovery).
     pub register: bool,
@@ -114,15 +126,15 @@ impl TreasuryFactory {
     /// bound a promise only.
     pub fn __constructor(env: Env, treasury_wasm: BytesN<32>, registry: Address, caps: Vec<TokenCap>) {
         if caps.is_empty() {
-            panic!("at least one token");
+            panic_with_error!(&env, FactoryError::NoTokens);
         }
         let mut tokens: Vec<Address> = Vec::new(&env);
         for c in caps.iter() {
             if c.cap < 0 {
-                panic!("deposit cap must not be negative");
+                panic_with_error!(&env, FactoryError::NegativeDepositCap);
             }
             if tokens.contains(&c.token) {
-                panic!("token listed twice");
+                panic_with_error!(&env, FactoryError::DuplicateToken);
             }
             tokens.push_back(c.token.clone());
             env.storage()
@@ -160,17 +172,18 @@ impl TreasuryFactory {
     /// Order matters for atomicity only in the sense that any refusal (an incoherent
     /// policy in the constructor, an invalid Leash, an unfunded owner) aborts the entire
     /// transaction: no half-configured treasury can exist.
-    pub fn create(env: Env, s: Setup) -> Address {
+    pub fn create(env: Env, s: Setup) -> Result<Address, FactoryError> {
         s.owner.require_auth();
         if s.leash.len() > 1 {
-            panic!("at most one Leash");
+            return Err(FactoryError::TooManyLeashes);
+        }
+        if s.fund < 0 {
+            return Err(FactoryError::NegativeFund);
         }
         let wasm: BytesN<32> = env.storage().instance().get(&DataKey::TreasuryWasm).unwrap();
         let registry: Address = env.storage().instance().get(&DataKey::Registry).unwrap();
-        let deposit_cap: i128 = match Self::deposit_cap(env.clone(), s.token.clone()) {
-            Some(cap) => cap,
-            None => panic!("token not accepted"),
-        };
+        let deposit_cap: i128 = Self::deposit_cap(env.clone(), s.token.clone())
+            .ok_or(FactoryError::TokenNotAccepted)?;
 
         // 1. The treasury: constructor validates the policy (InvalidLimits aborts here).
         let treasury = env.deployer().with_current_contract(s.salt.clone()).deploy_v2(
@@ -215,7 +228,7 @@ impl TreasuryFactory {
 
         env.events()
             .publish((symbol_short!("created"), s.owner), treasury.clone());
-        treasury
+        Ok(treasury)
     }
 }
 
