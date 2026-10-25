@@ -4,6 +4,7 @@ import Background from "./components/Background";
 import Landing from "./components/Landing";
 import FeedbackButton from "./components/FeedbackButton";
 import { logFunnel } from "./lib/funnel";
+import { I18nProvider } from "./components/LanguageSwitch";
 import { hashForView, isLandingAnchor, viewFromHash, type View } from "./lib/routes";
 import { ToastProvider } from "./state/toast";
 import { TreasuryProvider } from "./state/treasury";
@@ -72,7 +73,7 @@ export default function App() {
   };
 
   return (
-    <>
+    <I18nProvider>
       <Background />
 
       <AnimatePresence mode="wait">
@@ -112,6 +113,6 @@ export default function App() {
         )}
       </AnimatePresence>
       <FeedbackButton />
-    </>
+    </I18nProvider>
   );
 }

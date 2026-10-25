@@ -3,16 +3,18 @@
 import EunomiaMark from "../EunomiaMark";
 import WalletChip from "../WalletChip";
 import TreasurySwitcher from "./TreasurySwitcher";
+import { LanguageSwitch } from "../LanguageSwitch";
+import { useI18n } from "../../lib/i18n";
 import { APP_PAGES, type AppPage, type View } from "../../lib/routes";
 import "./shell.css";
 import "./ledger.css";
 
-const NAV: Record<AppPage, { label: string; icon: string }> = {
-  overview: { label: "Overview", icon: "◈" },
-  payments: { label: "Payments", icon: "→" },
-  agent: { label: "Agent", icon: "⚡" },
-  activity: { label: "Activity", icon: "≡" },
-  settings: { label: "Settings", icon: "⚙" },
+const NAV: Record<AppPage, { labelKey: string; icon: string }> = {
+  overview: { labelKey: "nav.overview", icon: "◈" },
+  payments: { labelKey: "nav.payments", icon: "→" },
+  agent: { labelKey: "nav.agent", icon: "⚡" },
+  activity: { labelKey: "nav.activity", icon: "≡" },
+  settings: { labelKey: "nav.settings", icon: "⚙" },
 };
 
 export default function AppShell({
@@ -24,6 +26,8 @@ export default function AppShell({
   onGo: (v: View) => void;
   children: React.ReactNode;
 }) {
+  const { t } = useI18n();
+
   return (
     <div className="shell">
       <aside className="shell__side">
@@ -39,19 +43,19 @@ export default function AppShell({
               onClick={() => onGo(p)}
               type="button"
             >
-              <span className="shell__icon">{NAV[p].icon}</span> {NAV[p].label}
+              <span className="shell__icon">{NAV[p].icon}</span> {t(NAV[p].labelKey)}
             </button>
           ))}
         </nav>
         <div className="shell__foot">
-          <div className="shell__beta">⚠ Mainnet beta — real funds, capped deposits.</div>
+          <div className="shell__beta">{t("nav.betaBanner")}</div>
           <a
             className="shell__docs"
             href="/docs/"
             target="_blank"
             rel="noreferrer"
           >
-            Docs ↗
+            {t("nav.docs")}
           </a>
         </div>
       </aside>
@@ -59,7 +63,10 @@ export default function AppShell({
       <div className="shell__main">
         <header className="shell__top">
           <TreasurySwitcher />
-          <WalletChip onWalletView={() => onGo("wallet")} />
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <LanguageSwitch />
+            <WalletChip onWalletView={() => onGo("wallet")} />
+          </div>
         </header>
         <main className="shell__content">{children}</main>
       </div>
@@ -73,7 +80,7 @@ export default function AppShell({
             type="button"
           >
             <span className="shell__icon">{NAV[p].icon}</span>
-            {NAV[p].label}
+            {t(NAV[p].labelKey)}
           </button>
         ))}
       </nav>

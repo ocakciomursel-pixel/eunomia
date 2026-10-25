@@ -6,6 +6,7 @@ import { shortAddr } from "../config";
 import { connect as kitConnect, disconnect as kitDisconnect, wcConfigured } from "../lib/walletKit";
 import { useWalletAddress } from "../lib/useWalletAddress";
 import { currentDevice } from "../lib/funnel";
+import { useI18n } from "../lib/i18n";
 import { MOBILE_WALLET_HINT } from "../lib/walletDevice";
 import { ToastContext } from "../state/toastContext";
 import "./appnav.css";
@@ -17,6 +18,7 @@ export default function WalletChip({
   onWalletView?: () => void;
   variant?: "solid" | "ghost";
 }) {
+  const { t } = useI18n();
   const address = useWalletAddress();
   const [menuOpen, setMenuOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -70,7 +72,7 @@ export default function WalletChip({
         disabled={connecting}
         type="button"
       >
-        {connecting ? "Connecting…" : "Connect wallet"}
+        {connecting ? t("nav.connecting") : t("nav.connectWallet")}
       </button>
     );
   }
@@ -83,7 +85,7 @@ export default function WalletChip({
       {menuOpen && (
         <div className="anav__menu">
           <button onClick={copy} type="button">
-            {copied ? "Copied ✓" : "Copy address"}
+            {copied ? t("nav.copied") : t("nav.copyAddress")}
           </button>
           {onWalletView && (
             <button
@@ -93,7 +95,7 @@ export default function WalletChip({
               }}
               type="button"
             >
-              Wallet details
+              {t("nav.walletDetails")}
             </button>
           )}
           <button
@@ -103,7 +105,7 @@ export default function WalletChip({
             }}
             type="button"
           >
-            Disconnect
+            {t("nav.disconnect")}
           </button>
         </div>
       )}
