@@ -410,7 +410,7 @@ impl ComplianceVerifier {
             LAST_PERIOD_TTL_EXTEND_TO,
         );
         env.events()
-            .publish((symbol_short!("attested"), treasury), (period, spent, root));
+            .publish((symbol_short!("attested"), treasury), (period, spent, root, last));
     }
 
     /// The last period this treasury attested to, if any.

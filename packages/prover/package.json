@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "fixtures": "tsx src/emit-fixtures.ts",
-    "test": "node --import tsx --test src/salt.test.ts src/payeeField.test.ts"
+    "test": "node --import tsx --test \"src/*.test.ts\""
   },
   "dependencies": {
     "@stellar/stellar-sdk": "^16.2.0"

@@ -1,10 +1,12 @@
-// Read a closed period's real payments off the chain: the treasury's own `paid` events.
+// Read a closed period's real spend commitments off the chain: the treasury's own `paid` and
+// `escrowed` events.
 //
 // A proof has to account for exactly what the treasury moved in the period, so the batch is
-// never typed in by hand — it is rebuilt from the events `pay()` emits, and the caller then
-// checks it adds up to the treasury's `period_spent`. The public RPC keeps about 7 days of
-// events, which matches the verifier's own 7-day lookback: a period too old to read here is
-// also too old to attest.
+// never typed in by hand — it is rebuilt from the events `pay()` and `create_escrow()` emit
+// (both charge `HourSpent`, which `period_spent` sums; `released` and `refunded` do not
+// charge the window again), and the caller then checks it adds up to the treasury's
+// `period_spent`. The public RPC keeps about 7 days of events, which matches the verifier's
+// own 7-day lookback: a period too old to read here is also too old to attest.
 import { rpc, scValToNative, xdr } from "@stellar/stellar-sdk";
 
 const SECONDS_PER_DAY = 86_400;
@@ -16,20 +18,38 @@ export interface PeriodPayment {
   to: string;
   amount: bigint;
   taskId: bigint;
+  kind?: "paid" | "escrowed";
   txHash: string;
   ledger: number;
   closedAt: string;
 }
 
-const PAID = xdr.ScVal.scvSymbol("paid").toXDR("base64");
+export interface RpcEventsClient {
+  getLatestLedger(): Promise<{ sequence: number }>;
+  getEvents(req: rpc.Api.GetEventsRequest): Promise<{
+    events: Array<{
+      ledgerClosedAt: string;
+      value: xdr.ScVal;
+      topic: xdr.ScVal[];
+      txHash: string;
+      ledger: number;
+    }>;
+    cursor?: string;
+    latestLedger: number;
+  }>;
+}
 
-/** Every `paid` event of `treasury` whose ledger closed inside UTC day `periodId`. */
+const PAID = xdr.ScVal.scvSymbol("paid").toXDR("base64");
+const ESCROWED = xdr.ScVal.scvSymbol("escrowed").toXDR("base64");
+
+/** Every `paid` and `escrowed` event of `treasury` whose ledger closed inside UTC day `periodId`. */
 export async function readPeriodPayments(
   rpcUrl: string,
   treasury: string,
   periodId: number,
+  client?: RpcEventsClient,
 ): Promise<PeriodPayment[]> {
-  const server = new rpc.Server(rpcUrl);
+  const server: RpcEventsClient = client ?? new rpc.Server(rpcUrl);
   const latest = (await server.getLatestLedger()).sequence;
   const dayStart = periodId * SECONDS_PER_DAY;
   const dayEnd = dayStart + SECONDS_PER_DAY;
@@ -38,7 +58,7 @@ export async function readPeriodPayments(
 
   const out: PeriodPayment[] = [];
   const filters: rpc.Api.EventFilter[] = [
-    { type: "contract", contractIds: [treasury], topics: [[PAID, "*"]] },
+    { type: "contract", contractIds: [treasury], topics: [[PAID, "*"], [ESCROWED, "*"]] },
   ];
   // The RPC scans a slice of ledgers per call and hands back a cursor even when that slice
   // was empty — page until the cursor reaches the tip, not until a page comes back short.
@@ -47,9 +67,19 @@ export async function readPeriodPayments(
     for (const e of page.events) {
       const t = Date.parse(e.ledgerClosedAt) / 1000;
       if (t < dayStart || t >= dayEnd) continue;
+      const head = String(scValToNative(e.topic[0]));
+      if (head !== "paid" && head !== "escrowed") continue;
       const [to, amount] = scValToNative(e.value) as [string, bigint];
       const taskId = scValToNative(e.topic[1]) as bigint;
-      out.push({ to, amount: BigInt(amount), taskId: BigInt(taskId), txHash: e.txHash, ledger: e.ledger, closedAt: e.ledgerClosedAt });
+      out.push({
+        to,
+        amount: BigInt(amount),
+        taskId: BigInt(taskId),
+        kind: head,
+        txHash: e.txHash,
+        ledger: e.ledger,
+        closedAt: e.ledgerClosedAt,
+      });
     }
     const cursorLedger = page.cursor ? Number(BigInt(page.cursor.split("-")[0]) >> 32n) : latest;
     if (!page.cursor || cursorLedger >= page.latestLedger) break;
