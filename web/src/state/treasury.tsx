@@ -46,6 +46,12 @@ import { discoverTreasuries, registerTreasury } from "../lib/registry";
 import { mergeTreasuries } from "../lib/treasuryList";
 import { useToast } from "./toastContext";
 import type { BudgetRequest } from "../lib/budgetRequestCodec";
+import BottomSheet from "../components/shell/BottomSheet";
+import {
+  setActiveTokenCode,
+  subscribeTxConfirmation,
+  type PendingTxConfirmation,
+} from "../lib/txSummary";
 import {
   TreasuryContext,
   type ActionOutcome,
@@ -74,6 +80,13 @@ export function TreasuryProvider({ children }: { children: React.ReactNode }) {
   const [registryIds, setRegistryIds] = useState<string[]>([]);
   const [creatingNew, setCreatingNew] = useState(false);
   const [localIds, setLocalIds] = useState<string[]>(() => (address ? listTreasuries(address) : []));
+  const [pendingConfirm, setPendingConfirm] = useState<PendingTxConfirmation | null>(null);
+
+  useEffect(() => {
+    setActiveTokenCode(tokenCodeOf(state?.token));
+  }, [state?.token]);
+
+  useEffect(() => subscribeTxConfirmation(setPendingConfirm), []);
 
   const [prevAddress, setPrevAddress] = useState(address);
   if (address !== prevAddress) {
@@ -276,6 +289,7 @@ export function TreasuryProvider({ children }: { children: React.ReactNode }) {
       // A USDC treasury opens empty: the wallet holds no USDC to move in, and the form does
       // not offer the field — whatever it still carries from an earlier choice is ignored.
       const code = extra.token ?? "XLM";
+      setActiveTokenCode(code);
       const fund = parseOptionalXlmAmount(code === "USDC" ? "" : (extra.fundXlm ?? ""), "starting funds");
       if (!fund.ok) return invalid(fund.msg);
       setBusy("deploy");
@@ -813,5 +827,54 @@ export function TreasuryProvider({ children }: { children: React.ReactNode }) {
     cancelNewTreasury: () => setCreatingNew(false),
   };
 
-  return <TreasuryContext.Provider value={value}>{children}</TreasuryContext.Provider>;
+  return (
+    <TreasuryContext.Provider value={value}>
+      {children}
+      <BottomSheet
+        open={pendingConfirm !== null}
+        onClose={() => pendingConfirm?.cancel()}
+        title="Confirm transaction"
+      >
+        {pendingConfirm && (
+          <div style={{ display: "grid", gap: 12, paddingTop: 4 }}>
+            <div style={{ fontSize: 13, color: "var(--ink-2)" }}>
+              Review the exact on-chain call before your passkey or wallet signs:
+            </div>
+            <div
+              data-testid="tx-summary-sentence"
+              style={{
+                fontFamily: "var(--font-mono, monospace)",
+                fontSize: 12.5,
+                lineHeight: 1.5,
+                padding: "10px 12px",
+                borderRadius: 10,
+                background: "var(--surface-2, rgba(34,62,5,0.06))",
+                border: "1px solid var(--line)",
+                color: "var(--ink)",
+                wordBreak: "break-all",
+              }}
+            >
+              {pendingConfirm.summary}
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                className="shell-btn"
+                onClick={() => pendingConfirm.cancel()}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="shell-btn shell-btn--primary"
+                onClick={() => pendingConfirm.confirm()}
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        )}
+      </BottomSheet>
+    </TreasuryContext.Provider>
+  );
 }

@@ -24,6 +24,7 @@ import {
   xdr,
 } from "@stellar/stellar-sdk";
 import { assertAuthMatches } from "./authCheck";
+import { confirmHostFunction } from "./txSummary";
 
 /** The one RPC capability this needs, narrowed so it unit-tests without a network. */
 export interface SimulatingServer {
@@ -135,6 +136,7 @@ async function runAsSmartWallet(
   const fn = op.body().invokeHostFunctionOp().hostFunction();
   const auth = sim.result.auth ?? [];
   assertAuthMatches(fn, auth, walletAddress);
+  await confirmHostFunction(fn);
   const signed = await Promise.all(auth.map((e) => deps.signAuthEntry(e)));
 
   await deps.relay(

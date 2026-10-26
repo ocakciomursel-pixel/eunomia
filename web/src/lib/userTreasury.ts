@@ -13,6 +13,7 @@ import {
 } from "@stellar/stellar-sdk";
 import { Client, type Session } from "./treasuryClient";
 import { contractErr, depositErr, errText } from "./wallet-errors";
+import { confirmHostFunction } from "./txSummary";
 import type { SubmittableTx, TxExecutor } from "./executor";
 import type { TokenCode } from "./token";
 import { TREASURY_WASM_HASH } from "./treasuryWasm";
@@ -193,6 +194,7 @@ export async function fundTreasury(
     .setTimeout(180)
     .build();
   const prepared = await server.prepareTransaction(built);
+  await confirmHostFunction(op.body().invokeHostFunctionOp().hostFunction(), { token: unit });
   const { signedTxXdr } = await signer.signTransaction(prepared.toXDR());
   const sent = await server.sendTransaction(
     TransactionBuilder.fromXDR(signedTxXdr, NETWORK_PASSPHRASE),

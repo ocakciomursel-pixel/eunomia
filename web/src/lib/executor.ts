@@ -10,6 +10,7 @@
 // which submits from its own channel account.
 import type { xdr } from "@stellar/stellar-sdk";
 import { assertAssembledAuth } from "./authCheck";
+import { confirmAssembledTx } from "./txSummary";
 import type { ContractSigner } from "./walletSigner";
 import type { PasskeyWallet } from "./passkey";
 
@@ -52,6 +53,7 @@ export function makeWalletExecutor(address: string, signer: ContractSigner): TxE
     kind: "wallet",
     signer,
     submit: async (tx) => {
+      await confirmAssembledTx(tx);
       const sent = await tx.signAndSend();
       const hash = (sent as { sendTransactionResponse?: { hash?: string } }).sendTransactionResponse
         ?.hash;
@@ -80,6 +82,7 @@ export function makePasskeyExecutor(
     },
     submit: async (tx) => {
       assertAssembledAuth(tx, contractId);
+      await confirmAssembledTx(tx);
       return relay(await wallet.sign(tx));
     },
     deployContract,
