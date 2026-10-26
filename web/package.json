@@ -12,6 +12,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:e2e": "playwright test",
     "test:live": "playwright test --config playwright.live.config.ts",
     "test:live:install": "playwright install --with-deps chromium",
     "users": "node scripts/user-count.mjs",

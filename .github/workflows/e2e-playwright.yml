@@ -1,0 +1,50 @@
+name: E2E — Playwright
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege — this workflow only checks out and runs mocked-RPC E2E specs.
+permissions:
+  contents: read
+
+jobs:
+  playwright:
+    name: Playwright · mocked RPC (Desktop Chrome + Pixel 7)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Install web dependencies
+        working-directory: web
+        run: npm install
+
+      - name: Install Playwright browsers (chromium + system deps)
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+
+      - name: Run non-live Playwright E2E specs
+        working-directory: web
+        run: npm run test:e2e
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: playwright-report
+          path: |
+            web/playwright-report/
+            web/test-results/
+          retention-days: 14
