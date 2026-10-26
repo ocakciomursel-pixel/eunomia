@@ -9,57 +9,78 @@ export default function TreasurySwitcher() {
   const { address, treasuryId, treasuries, switchTreasury, forgetTreasury, startNewTreasury } = useTreasury();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const chipRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!open) return;
-    const close = (e: MouseEvent) => {
+    const closeOnClickOutside = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     };
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
+    const closeOnEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setOpen(false);
+        chipRef.current?.focus();
+      }
+    };
+    document.addEventListener("mousedown", closeOnClickOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeOnClickOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
   }, [open]);
 
   if (!address || !treasuryId) return <span />;
 
   return (
     <div className="tswitch" ref={ref}>
-      <button className="tswitch__chip" onClick={() => setOpen((o) => !o)} type="button">
+      <button
+        ref={chipRef}
+        className="tswitch__chip"
+        aria-expanded={open}
+        aria-haspopup="true"
+        onClick={() => setOpen((o) => !o)}
+        type="button"
+      >
         ◇ {shortAddr(treasuryId)} <span className="tswitch__caret">▾</span>
       </button>
       {open && (
         <div className="tswitch__menu">
           {treasuries.map((t) => (
-            <button
-              key={t.id}
-              className="tswitch__row"
-              onClick={() => {
-                setOpen(false);
-                switchTreasury(t.id);
-              }}
-              type="button"
-            >
-              <span style={{ flex: 1 }}>{shortAddr(t.id)}</span>
-              {!t.registered && <span className="is-unreg">not registered</span>}
-              {t.id === treasuryId && <span className="is-current">✓</span>}
-              <span
+            <div key={t.id} className="tswitch__row">
+              <button
+                className="tswitch__select"
+                onClick={() => {
+                  setOpen(false);
+                  switchTreasury(t.id);
+                }}
+                type="button"
+              >
+                <span style={{ flex: 1 }}>{shortAddr(t.id)}</span>
+                {!t.registered && <span className="is-unreg">not registered</span>}
+                {t.id === treasuryId && <span className="is-current">✓</span>}
+              </button>
+              <button
                 className="tswitch__forget"
-                role="button"
-                tabIndex={0}
+                type="button"
                 title="Forget on this device only — the contract stays on-chain"
+                aria-label={`Forget treasury ${shortAddr(t.id)}`}
                 onClick={(e) => {
                   e.stopPropagation();
                   forgetTreasury(t.id);
                 }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
                     e.stopPropagation();
                     forgetTreasury(t.id);
                   }
                 }}
               >
                 forget
-              </span>
-            </button>
+              </button>
+            </div>
           ))}
           <button
             className="tswitch__row tswitch__new"

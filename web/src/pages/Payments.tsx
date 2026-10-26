@@ -278,7 +278,7 @@ export default function Payments() {
               {t.busy === "whitelist" ? "Adding…" : "Add payee"}
             </button>
           </div>
-          {payeeErr && <div className="err">{payeeErr}</div>}
+          {payeeErr && <div className="err" role="alert">{payeeErr}</div>}
         </section>
 
         <section className="panel panel--pad">
@@ -309,7 +309,7 @@ export default function Payments() {
                   ))}
                 </datalist>
                 {destLooksOff && (
-                  <div className="err">
+                  <div className="err" role="alert">
                     {payTo.trim().startsWith("C")
                       ? "Contract addresses can't receive payments — use a G… account."
                       : "That doesn't look like a Stellar account address."}
@@ -332,7 +332,7 @@ export default function Payments() {
                   onChange={(e) => setPayAmt(e.target.value)}
                 />
                 {s && (
-                  <div className={overPerTask || overDaily ? "err" : "panel__note"}>
+                  <div className={overPerTask || overDaily ? "err" : "panel__note"} role={overPerTask || overDaily ? "alert" : undefined}>
                     ≤ {fmtXlm(s.perTaskLimit)} {t.tokenCode} per payment · {remaining !== null ? fmtXlm(remaining) : "—"} {t.tokenCode} left today
                     {overPerTask && " — above your per-payment cap; it will be blocked"}
                     {!overPerTask && overDaily && " — above what's left today; it will be blocked"}
@@ -347,7 +347,7 @@ export default function Payments() {
                   {t.busy === "spend" ? "Sending…" : "Send payment"}
                 </button>
               </div>
-              {sendErr && <div className="err">{sendErr}</div>}
+              {sendErr && <div className="err" role="alert">{sendErr}</div>}
             </>
           )}
         </section>

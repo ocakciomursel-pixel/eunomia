@@ -45,7 +45,7 @@ export default function FinalCta({ onCreate }: { onCreate: () => Promise<void> }
             </a>
           </div>
           {err && (
-            <p className="lp__k" style={{ color: "#ff8a78", marginTop: 14 }}>
+            <p className="lp__k" role="alert" style={{ color: "#ff8a78", marginTop: 14 }}>
               {err}
             </p>
           )}

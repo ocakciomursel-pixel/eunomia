@@ -143,7 +143,7 @@ export default function BudgetRequestCard({ onDone }: { onDone: () => void }) {
             <button className="linkbtn" onClick={dismiss} type="button">not now</button>
           </div>
           <div className="panel__note">Link valid until {new Date(r.expires * 1000).toLocaleString()}.</div>
-          {err && <div className="err">{err}</div>}
+          {err && <div className="err" role="alert">{err}</div>}
         </>
       )}
     </section>

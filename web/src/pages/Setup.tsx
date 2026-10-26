@@ -114,7 +114,7 @@ export default function Setup() {
           >
             {t.busy === "connect" ? "Connecting…" : "Connect wallet"}
           </button>
-          {signInErr && <div className="err">{signInErr}</div>}
+          {signInErr && <div className="err" role="alert">{signInErr}</div>}
         </div>
       </div>
     );
@@ -264,7 +264,7 @@ export default function Setup() {
               {t.busy === "deploy" ? "Creating…" : "Create treasury"}
             </button>
           </div>
-          {err && <div className="err">{err}</div>}
+          {err && <div className="err" role="alert">{err}</div>}
         </section>
 
         {/* the quiet second path: a treasury this browser does not know about */}
@@ -294,7 +294,7 @@ export default function Setup() {
                 />
                 <button className="btn btn--ghost" onClick={doOpen} type="button">Open</button>
               </div>
-              {openErr && <div className="err">{openErr}</div>}
+              {openErr && <div className="err" role="alert">{openErr}</div>}
               <div className="panel__note">
                 The id is on the Settings page of the device that created it. Treasuries backed up on Stellar open by
                 themselves when you sign in with the same wallet or passkey.

@@ -88,7 +88,7 @@ export default function Settings() {
           </div>
           {!registered && (
             <div className="rowline">
-              <span className="err">This device's storage is the only key to this treasury. Save the ID, or back it up now.</span>
+              <span className="err" role="alert">This device's storage is the only key to this treasury. Save the ID, or back it up now.</span>
               <button className="btn" onClick={() => void t.registerActive()} disabled={!!t.busy} type="button">
                 {t.busy === "register" ? "Backing up…" : "Back up on Stellar"}
               </button>
@@ -138,7 +138,7 @@ export default function Settings() {
               {t.busy === "limits" ? "Updating…" : "Update limits"}
             </button>
           </div>
-          {limitsErr && <div className="err">{limitsErr}</div>}
+          {limitsErr && <div className="err" role="alert">{limitsErr}</div>}
         </section>
 
         {/* ---- v4: the month, and individual payees ---- */}
@@ -194,7 +194,7 @@ export default function Settings() {
               Months are UTC calendar months. A cap narrows what an approved payee can receive; it does not approve
               anyone. Cap your agent's own address to bound what it can hold outside the treasury.
             </div>
-            {monthErr && <div className="err">{monthErr}</div>}
+            {monthErr && <div className="err" role="alert">{monthErr}</div>}
           </section>
         )}
       </div>
@@ -250,7 +250,7 @@ export default function Settings() {
                   refuses the withdrawal. A passkey wallet (C…) needs nothing.
                 </div>
               )}
-              {withdrawErr && <div className="err">{withdrawErr}</div>}
+              {withdrawErr && <div className="err" role="alert">{withdrawErr}</div>}
             </>
           )}
         </section>

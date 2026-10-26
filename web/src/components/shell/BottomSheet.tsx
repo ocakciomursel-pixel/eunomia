@@ -1,10 +1,12 @@
 // Mobile bottom sheet — replaces the "scroll the inline panel into view" workaround for
 // forms that would otherwise land under the bottom tab bar. Sits above the tab bar
 // (z 1000) and the switcher dropdown (z 1200); closes on backdrop tap or Escape.
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 
 const EASE = [0.2, 0.7, 0.3, 1] as const;
+const FOCUSABLE_SELECTOR =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 export default function BottomSheet({
   open,
@@ -18,15 +20,86 @@ export default function BottomSheet({
   children: React.ReactNode;
 }) {
   const reduce = useReducedMotion();
+  const sheetRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  // Track the focused element outside the dialog so that a child with `autoFocus`
+  // mounting inside the sheet during React's commit phase does not overwrite the opener.
+  useEffect(() => {
+    const onFocusIn = (e: FocusEvent) => {
+      if (e.target instanceof HTMLElement && !e.target.closest('[role="dialog"]')) {
+        previousFocusRef.current = e.target;
+      }
+    };
+    document.addEventListener("focusin", onFocusIn, true);
+    return () => document.removeEventListener("focusin", onFocusIn, true);
+  }, []);
 
   useEffect(() => {
     if (!open) return;
+    const container = sheetRef.current;
+    if (
+      document.activeElement instanceof HTMLElement &&
+      document.activeElement !== document.body &&
+      !document.activeElement.closest('[role="dialog"]')
+    ) {
+      previousFocusRef.current = document.activeElement;
+    }
+    const previousFocus = previousFocusRef.current;
+
+    if (container) {
+      const focusables = Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
+      if (focusables.length > 0) {
+        focusables[0].focus();
+      } else {
+        container.focus();
+      }
+    }
+
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (e.key === "Tab") {
+        const dialog = sheetRef.current;
+        if (!dialog) return;
+        const focusables = Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
+        if (focusables.length === 0) {
+          e.preventDefault();
+          dialog.focus();
+          return;
+        }
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        const active = document.activeElement as HTMLElement | null;
+        if (e.shiftKey) {
+          if (active === first || !dialog.contains(active)) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else {
+          if (active === last || !dialog.contains(active)) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
+      }
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      if (previousFocus && typeof previousFocus.focus === "function") {
+        previousFocus.focus();
+      }
+    };
+  }, [open]);
 
   return (
     <AnimatePresence>
@@ -42,10 +115,12 @@ export default function BottomSheet({
             onClick={onClose}
           />
           <motion.div
+            ref={sheetRef}
             key="sheet"
             role="dialog"
             aria-modal="true"
             aria-label={title}
+            tabIndex={-1}
             style={sheet}
             initial={reduce ? { opacity: 0 } : { y: "100%" }}
             animate={reduce ? { opacity: 1 } : { y: 0 }}

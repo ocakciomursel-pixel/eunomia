@@ -141,7 +141,7 @@ export default function Agent() {
                 {t.busy === "session" ? "Starting…" : "Authorise agent"}
               </button>
             </div>
-            {err && <div className="err">{err}</div>}
+            {err && <div className="err" role="alert">{err}</div>}
           </section>
         )}
 

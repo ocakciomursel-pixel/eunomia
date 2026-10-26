@@ -172,7 +172,7 @@ export default function Overview({ onGo }: { onGo: (v: View) => void }) {
             : "Your wallet holds no USDC yet — send some to it first."}
         </div>
       )}
-      {fundErr && <div className="err" style={{ width: "100%" }}>{fundErr}</div>}
+      {fundErr && <div className="err" role="alert" style={{ width: "100%" }}>{fundErr}</div>}
     </div>
   );
 
@@ -344,7 +344,7 @@ export default function Overview({ onGo }: { onGo: (v: View) => void }) {
                 <div className="panel__kv"><span>Per payment</span><span className="num">{fmtXlm(s.perTaskLimit)} {t.tokenCode}</span></div>
                 <div className="panel__kv"><span>Approved payees</span><span className="num">{payeeCount ?? "—"}</span></div>
                 <div className="panel__kv"><span>Balance</span><span className="num" data-testid="treasury-balance">{fmtXlm(s.balance)} {t.tokenCode}</span></div>
-                {t.lifecycle?.paused && <div className="err">Spending is paused — every payment is refused until you resume.</div>}
+                {t.lifecycle?.paused && <div className="err" role="alert">Spending is paused — every payment is refused until you resume.</div>}
               </>
             ) : (
               <div className="shell__skel" style={{ height: 80 }} />

@@ -74,7 +74,7 @@ export default function ExceptionRequests({ agent }: { agent: string }) {
         resolving one is an on-chain change to your rules, and it counts as allowed only once Stellar would
         accept the payment.
       </div>
-      {err && <div className="err">{err}</div>}
+      {err && <div className="err" role="alert">{err}</div>}
       {rows.map((r) => {
         const status = exceptionStatus(r, t.state!, t.lifecycle, r.payeeAllowed, nowSec);
         // The reason codes are what blocked the payment when it was filed. Offer only an action
