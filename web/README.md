@@ -82,7 +82,7 @@ src/pages/                Overview · Payments · Agent · Activity · Settings 
 src/lib/                  userTreasury (deploy/fund/pay) · smartWalletTx (act as a passkey wallet)
                           relayHandler (fee sponsorship) · passkey · walletKit/walletSigner
                           insights (chart series) · events/analytics · activity (Supabase)
-worker/                   the Cloudflare worker: static assets + /api/relay, and its daily fee budget
+worker/                   the Cloudflare worker: static assets + /api/relay + /api/rpc, and its daily fee budget
 src/networks.ts           the mainnet table and the build settings that complete it
 src/config.ts             the app's view of that network — public values only
 ```

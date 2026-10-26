@@ -65,7 +65,7 @@ product shipped. No critical findings. Status of every finding:
 | C4 | Info | No admin withdraw/sweep — funds can strand if the agent key is lost or the whitelist is empty | ✅ Fixed (M2) — `admin_withdraw` (free balance, owner-signed, works while paused) + `set_paused` + `set_agent` rotation |
 | C3 | Low | No storage TTL management (`extend_ttl`) — long-idle entries can be archived | ✅ Fixed (v3.2) — every mutation auto-extends the instance-storage TTL (`bump_instance`); persistent escrow entries were already TTL-managed (R2); proof test `mutation_extends_instance_ttl` |
 | C5 | Info | No constructor bounds on limits (e.g. per-task > daily) | ✅ Fixed (M2) — constructor and `set_limits` validate `0 < per_task ≤ daily` (`InvalidLimits` #11) |
-| F4 | Low | No CSP / security headers on the static site | 🟡 Partly closed (2026-08-05) — `frame-ancestors 'none'` + `X-Frame-Options`, nosniff, Referrer-Policy, HSTS, Permissions-Policy shipped in `vercel.json`. `script-src`/`connect-src` still open: see [`web/docs/security-headers.md`](web/docs/security-headers.md) |
+| F4 | Low | No CSP / security headers on the static site | ✅ Fixed — `web/scripts/headers.mjs` writes `dist/_headers` after every `vite build` (served by Cloudflare on `eunomia.finance`), shipping a full CSP (`default-src 'self'`, SHA-256 inline-script hashes in `script-src`, exact build origins in `connect-src`, `frame-ancestors 'none'`, `base-uri 'self'`, `form-action 'self'`, `object-src 'none'`) plus `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`, `Strict-Transport-Security`, `Permissions-Policy`, and `Cross-Origin-Opener-Policy`: see [`web/docs/security-headers.md`](web/docs/security-headers.md) |
 | — | Info | npm audit 0 CVEs · pinned lockfile · no postinstall scripts · clean git history | ✅ Verified at audit time |
 
 A second fresh-eyes review (agent-assisted, **2026-07-07**, after M2 shipped) found and
@@ -153,7 +153,7 @@ deposit caps stay.
   oversized Leash — and a passkey prompt shows no transaction detail to catch it (a wallet's
   own confirmation screen shows more). What bounds it today: every such call still needs the
   owner's signature, one at a time, and nothing can be taken without one. What mainnet needs:
-  a strict `script-src`/`connect-src` policy, reproducible builds a third party can compare
+  a strict `script-src`/`connect-src` policy (`web/scripts/headers.mjs`) is now shipped; reproducible builds a third party can compare
   with what is served, and a human-readable summary of what is being signed.
 - **The published package is a supply-chain surface.** A poisoned `eunomia-mcp` release could
   read the agent keys it manages. The damage is bounded by each Leash — cap, deadline, approved

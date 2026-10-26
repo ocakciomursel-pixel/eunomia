@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  // The app on Cloudflare (SOW 2: Vercel → Cloudflare). Static assets plus worker/index.ts
+  // The app on Cloudflare. Static assets plus worker/index.ts
   // for /api/relay. Build first (npm run build, with the EUNOMIA_* settings), then
   // wrangler deploy.
   "name": "eunomia-app",

@@ -23,7 +23,7 @@ dist-ssr
 *.sln
 *.sw?
 
-.vercel
+
 
 # Local env — real keys never committed
 .env

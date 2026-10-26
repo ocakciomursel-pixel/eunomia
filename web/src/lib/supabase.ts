@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 
 // Strip any non-printable-ASCII bytes from env values. A BOM / zero-width char (U+FEFF,
-// U+200B) can sneak in when pasting into `vercel env add`; supabase-js sets the anon key as
+// U+200B) can sneak in when pasting env vars; supabase-js sets the anon key as
 // an HTTP header, and a non-ISO-8859-1 code point throws "Failed to execute 'set' on
 // 'Headers'" — so the insert never even goes out. `.trim()` misses U+200B, so strip
 // everything outside printable ASCII (keys and URLs are ASCII anyway).
