@@ -173,7 +173,7 @@ web/                            landing + app (Vite · React 19 · TS)
 web/worker/                     Cloudflare worker: static assets + the fee-sponsoring relay for passkey wallets
 web/docs-site/                  the docs site (VitePress) served at /docs
 workers/chain-indexer/          cron worker: chain events → Supabase
-supabase/migrations/            telemetry tables (activity with tx hashes, feedback, funnel, chain events)
+supabase/migrations/            telemetry tables (activity with tx hashes, feedback, funnel, chain events; ordering in supabase/README.md)
 docs/PLAYBOOK.md                how to build policy-bounded agent spending on Stellar — patterns, addresses, gotchas
 docs/RUNBOOK.md                 incidents and routine: revoke, pause, withdraw; relay top-up, alerts, key rotation
 COMPARISON.md                   where Eunomia sits among the platform pieces, funded projects and 2026 hackathon work, sourced

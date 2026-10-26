@@ -9,6 +9,8 @@ import { describe, expect, it } from "vitest";
 import { ACTIVITY_ACTIONS } from "./activity";
 
 const MIGRATION = resolve(__dirname, "../../../supabase/migrations/0005_activity_action_verbs.sql");
+const CHECKS_0003 = resolve(__dirname, "../../../supabase/migrations/0003_data_quality_checks.sql");
+const HYGIENE_0008 = resolve(__dirname, "../../../supabase/migrations/0008_migration_hygiene.sql");
 
 function allowedVerbs(sql: string): string[] {
   const m = sql.match(/activity_action_allowed check \(action in \(([\s\S]*?)\)\)/i);
@@ -25,5 +27,26 @@ describe("activity action allowlist", () => {
 
   it("has no verb the code never emits", () => {
     for (const v of verbs) expect(ACTIVITY_ACTIONS as readonly string[], `code never logs '${v}'`).toContain(v);
+  });
+});
+
+describe("migration 0008 hygiene", () => {
+  const sql0003 = readFileSync(CHECKS_0003, "utf8");
+  const sql0008 = readFileSync(HYGIENE_0008, "utf8");
+
+  it("drops the anon insert policy on feedback", () => {
+    expect(sql0008).toMatch(/drop\s+policy\s+if\s+exists\s+"anon can insert feedback"\s+on\s+public\.feedback\s*;/i);
+  });
+
+  it("validates every NOT VALID constraint added in 0003_data_quality_checks.sql", () => {
+    const constraints = Array.from(
+      sql0003.matchAll(/alter\s+table\s+(public\.\w+)\s+add\s+constraint\s+(\w+)\s+check\s*\([\s\S]*?\)\s*not\s+valid\s*;/gi),
+      (m) => ({ table: m[1], name: m[2] }),
+    );
+    expect(constraints.length).toBe(7);
+    for (const { table, name } of constraints) {
+      const re = new RegExp(`alter\\s+table\\s+${table.replace(".", "\\.")}\\s+validate\\s+constraint\\s+${name}\\s*;`, "i");
+      expect(sql0008, `missing validate constraint for ${table}.${name}`).toMatch(re);
+    }
   });
 });
