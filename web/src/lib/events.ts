@@ -44,6 +44,16 @@ export function formatEvent(topics: unknown[], data: unknown): { kind: string; l
       return { kind, label: `Escrow #${topics[1]} released to ${short(d?.[0])}` };
     case "refunded":
       return { kind, label: `Escrow #${topics[1]} refunded` };
+    case "cancelled":
+      return { kind, label: `Escrow #${topics[1]} cancelled` };
+    case "payee_cap":
+      return {
+        kind,
+        label:
+          Number(data) > 0
+            ? `Payee cap set for ${short(topics[1])}: ${xlm(data)} XLM`
+            : `Payee cap removed for ${short(topics[1])}`,
+      };
     case "payee_add":
       return { kind, label: `Payee approved: ${short(data)}` };
     case "payee_rm":
@@ -79,8 +89,18 @@ export async function fetchEventsPage(
     const data = scValToNative(e.value);
     const { kind, label } = formatEvent(topics, data);
     const d = data as unknown[];
-    const amountXlm = kind === "paid" ? Number(d?.[1]) / 1e7 : undefined;
-    const payee = kind === "payee_add" || kind === "payee_rm" ? String(data) : undefined;
+    const amountXlm =
+      kind === "paid"
+        ? Number(d?.[1]) / 1e7
+        : kind === "payee_cap"
+          ? Number(data) / 1e7
+          : undefined;
+    const payee =
+      kind === "payee_add" || kind === "payee_rm"
+        ? String(data)
+        : kind === "payee_cap" && topics[1] !== undefined
+          ? String(topics[1])
+          : undefined;
     return {
       id: e.id,
       kind,

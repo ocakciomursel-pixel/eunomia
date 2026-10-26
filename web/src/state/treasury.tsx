@@ -15,6 +15,7 @@ import {
 import { createTreasury, type TreasurySetup } from "../lib/createTreasury";
 import {
   addPayee,
+  adminCancelEscrow,
   adminWithdraw,
   fundTreasury,
   isValidContractId,
@@ -23,6 +24,7 @@ import {
   pay,
   readLifecycle,
   readState,
+  refundEscrow,
   runsTreasuryCode,
   removePayee,
   revokeSession,
@@ -34,6 +36,7 @@ import {
   type Lifecycle,
   type EunomiaState,
 } from "../lib/userTreasury";
+import { forgetCappedPayee, rememberCappedPayee } from "../lib/payees";
 import { NETWORK_LABEL, shortAddr } from "../config";
 import { getContractXlmBalance, getXlmBalance } from "../lib/funding";
 import { connectErr, errText, sendErr } from "../lib/wallet-errors";
@@ -697,9 +700,12 @@ export function TreasuryProvider({ children }: { children: React.ReactNode }) {
       try {
         const res = await setPayeeCap(makeTreasury(treasuryId, await executorFor(address)), p, v.value);
         if (res.ok) {
+          if (v.value === 0) forgetCappedPayee(treasuryId, p);
+          else rememberCappedPayee(treasuryId, p);
           void logActivity({ walletAddress: address, treasuryId, action: "limits" });
           const msg = v.value === 0 ? "Payee cap removed ✓" : `Cap set ✓ — ${shortAddr(p)} can receive at most that per month.`;
           toast("success", msg, { hash: res.hash });
+          bump();
           await loadState(treasuryId, address);
           return { ok: true, msg, hash: res.hash };
         }
@@ -714,7 +720,63 @@ export function TreasuryProvider({ children }: { children: React.ReactNode }) {
         setBusy(null);
       }
     },
-    [address, treasuryId, loadState, toast],
+    [address, treasuryId, bump, loadState, toast],
+  );
+
+  const cancelEscrow = useCallback(
+    async (id: bigint): Promise<ActionOutcome> => {
+      if (!address || !treasuryId) return fail("No treasury open.");
+      setBusy("escrow");
+      toast("info", `Cancelling escrow #${id.toString()} — confirm in your wallet…`);
+      try {
+        const res = await adminCancelEscrow(makeTreasury(treasuryId, await executorFor(address)), id);
+        if (res.ok) {
+          const msg = `Escrow #${id.toString()} cancelled ✓ — locked funds returned to the free balance.`;
+          toast("success", msg, { hash: res.hash });
+          bump();
+          await loadState(treasuryId, address);
+          return { ok: true, msg, hash: res.hash };
+        }
+        const msg = `Blocked: ${res.errorMessage}`;
+        toast("error", msg);
+        return fail(msg);
+      } catch (e) {
+        const msg = sendErr(e);
+        toast("error", msg);
+        return fail(msg);
+      } finally {
+        setBusy(null);
+      }
+    },
+    [address, treasuryId, bump, loadState, toast],
+  );
+
+  const refundEscrowById = useCallback(
+    async (id: bigint): Promise<ActionOutcome> => {
+      if (!address || !treasuryId) return fail("No treasury open.");
+      setBusy("escrow");
+      toast("info", `Refunding escrow #${id.toString()} — confirm in your wallet…`);
+      try {
+        const res = await refundEscrow(makeTreasury(treasuryId, await executorFor(address)), id);
+        if (res.ok) {
+          const msg = `Escrow #${id.toString()} refunded ✓ — locked funds returned to the free balance.`;
+          toast("success", msg, { hash: res.hash });
+          bump();
+          await loadState(treasuryId, address);
+          return { ok: true, msg, hash: res.hash };
+        }
+        const msg = `Blocked: ${res.errorMessage}`;
+        toast("error", msg);
+        return fail(msg);
+      } catch (e) {
+        const msg = sendErr(e);
+        toast("error", msg);
+        return fail(msg);
+      } finally {
+        setBusy(null);
+      }
+    },
+    [address, treasuryId, bump, loadState, toast],
   );
 
   // Catch-up registration for a treasury whose deploy-time registration was skipped.
@@ -805,6 +867,8 @@ export function TreasuryProvider({ children }: { children: React.ReactNode }) {
     updateLimits,
     updateMonthly,
     capPayee,
+    cancelEscrow,
+    refundEscrowById,
     registerActive,
     switchTreasury,
     forgetTreasury,

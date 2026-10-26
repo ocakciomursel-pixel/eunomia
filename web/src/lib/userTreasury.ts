@@ -404,6 +404,123 @@ export async function setPayeeCap(t: Treasury, payee: string, capXlm: number): P
   return sendTx(() => t.client.set_payee_cap({ payee, cap: toStroops(capXlm) }), "Payee cap update failed.", t.submit);
 }
 
+export interface PayeeCapRow {
+  payee: string;
+  cap: bigint;
+  spent: bigint;
+}
+
+/** The monthly cap on `payee` (0n when uncapped). */
+export async function payeeCap(t: Treasury, payee: string): Promise<bigint> {
+  return (await t.client.payee_cap({ payee })).result;
+}
+
+/** What `payee` has been paid (or committed in escrow) in `month`. */
+export async function payeeSpent(t: Treasury, payee: string, month: number): Promise<bigint> {
+  return (await t.client.payee_spent({ payee, month })).result;
+}
+
+/** Read each payee's monthly cap and this month's spend from the contract. */
+export async function readPayeeCaps(
+  t: Treasury,
+  payees: string[],
+  month: number,
+): Promise<PayeeCapRow[]> {
+  const unique = [...new Set(payees.map((p) => p.trim()).filter(Boolean))];
+  return Promise.all(
+    unique.map(async (payee) => {
+      const [cap, spent] = await Promise.all([payeeCap(t, payee), payeeSpent(t, payee, month)]);
+      return { payee, cap, spent };
+    }),
+  );
+}
+
+// ---- escrow: locked funds + owner cancel / refund -------------------------------
+
+export interface OpenEscrow {
+  id: bigint;
+  payee: string;
+  amount: bigint;
+  taskId: bigint;
+  deadline: bigint;
+}
+
+/** Total funds currently reserved by open escrows (0n when none or pre-escrow). */
+export async function readLocked(t: Treasury): Promise<bigint> {
+  try {
+    return (await t.client.locked()).result;
+  } catch {
+    return 0n;
+  }
+}
+
+/** Read one escrow entry by id, or null when it is not open. */
+export async function getEscrow(t: Treasury, id: bigint): Promise<OpenEscrow | null> {
+  try {
+    const res = (await t.client.get_escrow({ id })).result;
+    if (!res) return null;
+    return {
+      id,
+      payee: res.payee,
+      amount: res.amount,
+      taskId: res.task_id,
+      deadline: res.deadline,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Read the total locked balance and every open escrow contributing to it.
+ *
+ *  Escrow ids are allocated sequentially from 0 (`NextEscrowId`), and `locked` equals the
+ *  exact sum of open escrows' positive `amount`s. Scanning stops as soon as the found
+ *  entries account for `locked` (or `maxScan` ids have been probed). */
+export async function readOpenEscrows(
+  t: Treasury,
+  candidateIds: bigint[] = [],
+  maxScan = 32,
+): Promise<{ locked: bigint; escrows: OpenEscrow[] }> {
+  const locked = await readLocked(t);
+  if (locked <= 0n) return { locked: 0n, escrows: [] };
+  const ids: bigint[] = [];
+  const seen = new Set<string>();
+  const push = (id: bigint) => {
+    if (id < 0n) return;
+    const k = id.toString();
+    if (!seen.has(k)) {
+      seen.add(k);
+      ids.push(id);
+    }
+  };
+  for (const id of candidateIds) push(id);
+  for (let i = 0; i < maxScan; i++) push(BigInt(i));
+
+  const escrows: OpenEscrow[] = [];
+  let sum = 0n;
+  for (const id of ids) {
+    if (sum >= locked) break;
+    const entry = await getEscrow(t, id);
+    if (entry) {
+      escrows.push(entry);
+      sum += entry.amount;
+    }
+  }
+  escrows.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  return { locked, escrows };
+}
+
+/** Owner unilaterally cancels an open escrow — returns the locked funds to the free balance
+ *  immediately (no deadline needed, works while paused). */
+export async function adminCancelEscrow(t: Treasury, id: bigint): Promise<PayResult> {
+  return sendTx(() => t.client.admin_cancel_escrow({ id }), "Escrow cancel failed.", t.submit);
+}
+
+/** Reclaim an undelivered escrow after its deadline has passed (spender-signed, works while paused). */
+export async function refundEscrow(t: Treasury, id: bigint): Promise<PayResult> {
+  return sendTx(() => t.client.refund_escrow({ id }), "Escrow refund failed.", t.submit);
+}
+
 /** Instantly revoke the session (owner-signed) — spending falls back to the wallet. */
 export async function revokeSession(t: Treasury): Promise<PayResult> {
   return sendTx(() => t.client.revoke_session(), "Session revoke failed.", t.submit);

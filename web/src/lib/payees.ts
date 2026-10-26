@@ -73,3 +73,46 @@ export function forgetPayee(treasuryId: string, addr: string): void {
   const list = loadPayeeBook(treasuryId).filter((a) => a !== addr);
   localStorage.setItem(BOOK_PREFIX + treasuryId, JSON.stringify(list));
 }
+
+// ---- device-local capped payee book (v4) ------------------------------------------
+// A monthly cap can be set on any address (including the agent's own float address, before or
+// without whitelisting it). Remembering addresses capped from Settings lets the payee caps
+// table list them alongside approved payees and on-chain `payee_cap` events.
+
+const CAP_BOOK_PREFIX = "prism_payee_caps:";
+
+export function cappedPayeesFromEvents(events: FeedEvent[]): string[] {
+  const seen = new Set<string>();
+  for (const e of [...events].sort(idOrder)) {
+    if (e.kind === "payee_cap" && e.payee) {
+      if (e.amountXlm !== undefined && e.amountXlm <= 0) seen.delete(e.payee);
+      else seen.add(e.payee);
+    }
+  }
+  return [...seen];
+}
+
+export function loadCappedPayeeBook(treasuryId: string): string[] {
+  if (typeof localStorage === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(CAP_BOOK_PREFIX + treasuryId);
+    const list = raw ? (JSON.parse(raw) as unknown) : [];
+    return Array.isArray(list) ? list.filter((a): a is string => typeof a === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+export function rememberCappedPayee(treasuryId: string, addr: string): void {
+  if (typeof localStorage === "undefined") return;
+  const list = loadCappedPayeeBook(treasuryId);
+  if (!list.includes(addr)) {
+    localStorage.setItem(CAP_BOOK_PREFIX + treasuryId, JSON.stringify([...list, addr]));
+  }
+}
+
+export function forgetCappedPayee(treasuryId: string, addr: string): void {
+  if (typeof localStorage === "undefined") return;
+  const list = loadCappedPayeeBook(treasuryId).filter((a) => a !== addr);
+  localStorage.setItem(CAP_BOOK_PREFIX + treasuryId, JSON.stringify(list));
+}

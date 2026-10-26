@@ -22,6 +22,7 @@ export type Busy =
   | "withdraw"
   | "limits"
   | "monthly"
+  | "escrow"
   | "register";
 
 /** validation:true = the wallet popup never opened; show `msg` inline at the form. */
@@ -80,6 +81,10 @@ export interface TreasuryContextValue {
   updateMonthly: (limit: string) => Promise<ActionOutcome>;
   /** v4: a payee's monthly cap ("" or "0" removes it). */
   capPayee: (payee: string, cap: string) => Promise<ActionOutcome>;
+  /** Cancel an open escrow unilaterally as the treasury admin (returns locked funds to free balance). */
+  cancelEscrow: (id: bigint) => Promise<ActionOutcome>;
+  /** Reclaim an expired escrow back to the free balance when the wallet is the spender. */
+  refundEscrowById: (id: bigint) => Promise<ActionOutcome>;
   togglePause: () => Promise<ActionOutcome>;
   withdraw: (to: string, amount: string) => Promise<ActionOutcome>;
   updateLimits: (daily: string, perTask: string) => Promise<ActionOutcome>;

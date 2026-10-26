@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, it, expect } from "vitest";
 import {
   connectErr,
@@ -8,6 +10,18 @@ import {
   isStaleSessionError,
   sendErr,
 } from "./wallet-errors";
+
+const TREASURY_RS = resolve(__dirname, "../../../contracts/treasury/src/lib.rs");
+const TOKEN_TRUSTLINE_CODE = 13;
+
+function parseTreasuryErrorEnum(rs: string): Array<{ name: string; code: number }> {
+  const m = rs.match(/pub\s+enum\s+Error\s*\{([\s\S]*?)\}/);
+  if (!m) throw new Error("pub enum Error not found in contracts/treasury/src/lib.rs");
+  return Array.from(m[1].matchAll(/^\s*([A-Za-z0-9_]+)\s*=\s*(\d+)\s*,/gm), (x) => ({
+    name: x[1],
+    code: Number(x[2]),
+  }));
+}
 
 describe("errText", () => {
   it("returns an Error's message", () => {
@@ -55,12 +69,24 @@ describe("sendErr", () => {
 });
 
 describe("contractErr", () => {
-  it("maps every contract error code (1..12) to its friendly message", () => {
-    for (const code of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]) {
+  const contractCodes = parseTreasuryErrorEnum(readFileSync(TREASURY_RS, "utf8"));
+
+  it("stays in sync with contracts/treasury/src/lib.rs pub enum Error", () => {
+    expect(contractCodes.length).toBeGreaterThan(0);
+    for (const { name, code } of contractCodes) {
+      expect(CONTRACT_ERRORS[code], `CONTRACT_ERRORS is missing #${code} (${name})`).toBeTruthy();
       expect(contractErr(`host error: Error(Contract, #${code})`)).toEqual({
         errorCode: code,
         errorMessage: CONTRACT_ERRORS[code],
       });
+    }
+    // #13 is the token contract's missing-trustline error, deliberately skipped by the treasury enum.
+    expect(contractCodes.some((c) => c.code === TOKEN_TRUSTLINE_CODE)).toBe(false);
+    expect(CONTRACT_ERRORS[TOKEN_TRUSTLINE_CODE]).toMatch(/trustline/i);
+
+    const expectedCodes = new Set([...contractCodes.map((c) => c.code), TOKEN_TRUSTLINE_CODE]);
+    for (const key of Object.keys(CONTRACT_ERRORS).map(Number)) {
+      expect(expectedCodes.has(key), `CONTRACT_ERRORS has unknown code #${key}`).toBe(true);
     }
   });
   it("reads the pause and session-cap rejections as guardrails, not failures", () => {

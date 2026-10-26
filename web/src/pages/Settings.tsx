@@ -1,8 +1,24 @@
 // Treasury settings: identity (full ID + registry status with catch-up registration), live
-// limit updates, and the owner exits (pause / withdraw — the paths that keep working even
-// while paused). The exits sit in a red-framed panel apart from day-to-day edits.
-import { useState } from "react";
+// limit updates, payee monthly caps + spend, and the owner exits (escrow cancel / refund,
+// pause / withdraw — the paths that keep working even while paused).
+import { useEffect, useMemo, useState } from "react";
 import { EXPLORER, fmtXlm, shortAddr } from "../config";
+import { loadLedger } from "../lib/eventLedger";
+import {
+  cappedPayeesFromEvents,
+  loadCappedPayeeBook,
+  loadPayeeBook,
+  mergePayees,
+  payeesFromEvents,
+} from "../lib/payees";
+import {
+  makeTreasury,
+  readOpenEscrows,
+  readPayeeCaps,
+  type OpenEscrow,
+  type PayeeCapRow,
+} from "../lib/userTreasury";
+import { executorFor } from "../lib/walletKit";
 import { useTreasury } from "../state/useTreasury";
 
 export default function Settings() {
@@ -58,6 +74,80 @@ export default function Settings() {
       setCapAmt("");
     } else if (res.validation) setMonthErr(res.msg);
   };
+
+  // ---- v4 payee caps + this month's spend per payee ------------------------------
+  const approvedPayees = useMemo(
+    () => mergePayees(payeesFromEvents(loadLedger(treasuryId)), loadPayeeBook(treasuryId)).map((p) => p.address),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refreshKey invalidates localStorage ledger/book
+    [treasuryId, t.refreshKey],
+  );
+  const candidatePayees = useMemo(() => {
+    const events = loadLedger(treasuryId);
+    const extras = [
+      ...cappedPayeesFromEvents(events),
+      ...loadCappedPayeeBook(treasuryId),
+      ...(v4?.sessionPayees ?? []),
+      ...(t.lifecycle?.session?.agent ? [t.lifecycle.session.agent] : []),
+      ...(t.state?.agent && t.state.agent !== t.address ? [t.state.agent] : []),
+    ];
+    return [...new Set([...approvedPayees, ...extras])];
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refreshKey invalidates localStorage ledger/book
+  }, [approvedPayees, treasuryId, t.refreshKey, v4?.sessionPayees, t.lifecycle?.session?.agent, t.state?.agent, t.address]);
+
+  const [payeeCaps, setPayeeCaps] = useState<PayeeCapRow[]>([]);
+  useEffect(() => {
+    const addr = t.address;
+    const month = v4?.month;
+    if (!addr || month === undefined || candidatePayees.length === 0) {
+      setPayeeCaps([]);
+      return;
+    }
+    let alive = true;
+    (async () => {
+      try {
+        const treasury = makeTreasury(treasuryId, await executorFor(addr));
+        const rows = await readPayeeCaps(treasury, candidatePayees, month);
+        if (!alive) return;
+        const approvedSet = new Set(approvedPayees);
+        setPayeeCaps(rows.filter((r) => approvedSet.has(r.payee) || r.cap > 0n || r.spent > 0n));
+      } catch {
+        /* RPC hiccup — keep existing table rows */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [t.address, treasuryId, v4?.month, candidatePayees, approvedPayees, t.refreshKey]);
+
+  // ---- escrows / locked funds ----------------------------------------------------
+  const [locked, setLocked] = useState<bigint>(0n);
+  const [escrows, setEscrows] = useState<OpenEscrow[]>([]);
+  useEffect(() => {
+    const addr = t.address;
+    if (!addr || t.legacy) {
+      setLocked(0n);
+      setEscrows([]);
+      return;
+    }
+    let alive = true;
+    (async () => {
+      try {
+        const treasury = makeTreasury(treasuryId, await executorFor(addr));
+        const res = await readOpenEscrows(treasury);
+        if (!alive) return;
+        setLocked(res.locked);
+        setEscrows(res.escrows);
+      } catch {
+        /* RPC hiccup — leave previous snapshot */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [t.address, treasuryId, t.legacy, t.refreshKey]);
+
+  const freeBalance = t.state ? (t.state.balance > locked ? t.state.balance - locked : 0n) : null;
+  const nowSec = BigInt(Math.floor(Date.now() / 1000));
 
   const doWithdraw = async () => {
     setWithdrawErr("");
@@ -167,6 +257,58 @@ export default function Settings() {
                 {t.busy === "monthly" && newMonthly ? "Saving…" : "Set monthly limit"}
               </button>
             </div>
+            <div className="eyebrow" style={{ marginTop: 8 }}>Payee monthly caps &amp; spend</div>
+            {payeeCaps.length === 0 ? (
+              <div className="panel__note">
+                No capped or approved payees yet. Set a monthly cap below or approve a payee on the Payments page.
+              </div>
+            ) : (
+              <div data-testid="payee-caps-table">
+                <div
+                  className="rowline"
+                  style={{ padding: "6px 0", borderBottom: "1px solid var(--line)", fontSize: 11, color: "var(--ink-2)" }}
+                >
+                  <span className="eyebrow">Payee</span>
+                  <span className="eyebrow">This month</span>
+                  <span className="eyebrow">Monthly cap</span>
+                </div>
+                {payeeCaps.map((row) => (
+                  <div
+                    key={row.payee}
+                    className="rowline"
+                    style={{ padding: "8px 0", borderBottom: "1px solid var(--line)" }}
+                  >
+                    <button
+                      className="linkbtn"
+                      style={{ fontFamily: "var(--code)", fontSize: 13, color: "var(--ink)" }}
+                      onClick={() => setCapWho(row.payee)}
+                      title={`Edit cap for ${row.payee}`}
+                      type="button"
+                    >
+                      {shortAddr(row.payee)}
+                    </button>
+                    <span className="num" style={{ fontSize: 13 }}>
+                      {fmtXlm(row.spent)} {t.tokenCode}
+                    </span>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                      <span className="num" style={{ fontSize: 13, color: row.cap > 0n ? "var(--ink)" : "var(--ink-2)" }}>
+                        {row.cap > 0n ? `${fmtXlm(row.cap)} ${t.tokenCode}` : "no cap"}
+                      </span>
+                      {row.cap > 0n && (
+                        <button
+                          className="chip"
+                          onClick={() => void t.capPayee(row.payee, "0")}
+                          disabled={!!t.busy}
+                          type="button"
+                        >
+                          remove cap
+                        </button>
+                      )}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="eyebrow" style={{ marginTop: 8 }}>Cap one payee per month</div>
             <input
               className="field field--mono"
@@ -254,6 +396,82 @@ export default function Settings() {
             </>
           )}
         </section>
+
+        {!t.legacy && (
+          <section className="panel panel--pad" data-testid="escrow-panel">
+            <div className="eyebrow">Escrow &amp; locked funds</div>
+            <div className="panel__kv">
+              <span>Locked in escrows</span>
+              <span className="num">{fmtXlm(locked)} {t.tokenCode}</span>
+            </div>
+            {freeBalance !== null && (
+              <div className="panel__kv">
+                <span>Free balance</span>
+                <span className="num">{fmtXlm(freeBalance)} {t.tokenCode}</span>
+              </div>
+            )}
+            {escrows.length === 0 ? (
+              <div className="panel__note">
+                {locked === 0n
+                  ? "No funds are locked in open escrows — the full balance is free to spend or withdraw."
+                  : "Reading open escrows from the treasury…"}
+              </div>
+            ) : (
+              <div>
+                {escrows.map((e) => {
+                  const expired = nowSec >= e.deadline;
+                  return (
+                    <div
+                      key={e.id.toString()}
+                      style={{
+                        padding: "10px 0",
+                        borderTop: "1px solid var(--line)",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 6,
+                      }}
+                    >
+                      <div className="rowline">
+                        <span className="num" style={{ fontSize: 13 }}>
+                          Escrow #{e.id.toString()} · {fmtXlm(e.amount)} {t.tokenCode} →{" "}
+                          <span title={e.payee}>{shortAddr(e.payee)}</span>
+                        </span>
+                        <div style={{ display: "flex", gap: 6 }}>
+                          {expired && !t.sessionActive && (
+                            <button
+                              className="chip"
+                              onClick={() => void t.refundEscrowById(e.id)}
+                              disabled={!!t.busy}
+                              type="button"
+                            >
+                              Refund
+                            </button>
+                          )}
+                          <button
+                            className="btn btn--danger"
+                            onClick={() => void t.cancelEscrow(e.id)}
+                            disabled={!!t.busy}
+                            type="button"
+                          >
+                            {t.busy === "escrow" ? "Cancelling…" : "Cancel escrow"}
+                          </button>
+                        </div>
+                      </div>
+                      <div className="panel__note" style={{ fontSize: 12 }}>
+                        task #{e.taskId.toString()} · deadline {new Date(Number(e.deadline) * 1000).toLocaleString()}
+                        {expired ? " (expired)" : ""}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <div className="panel__note">
+              Cancelling an open escrow returns the locked funds to the free balance immediately, works while paused,
+              and pays nothing out.
+            </div>
+          </section>
+        )}
       </div>
     </div>
   );

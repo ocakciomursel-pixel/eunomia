@@ -1,10 +1,14 @@
 import { describe, it, expect, vi } from "vitest";
 import { Address, rpc, xdr } from "@stellar/stellar-sdk";
 import {
+  adminCancelEscrow,
   makeTreasury,
   isOwnedBy,
   isValidContractId,
   readLifecycle,
+  readOpenEscrows,
+  readPayeeCaps,
+  refundEscrow,
   runsTreasuryCode,
   toStroops,
   TREASURY_WASM_HASH,
@@ -182,5 +186,86 @@ describe("runsTreasuryCode", () => {
     await expect(runsTreasuryCode(DEPLOYED)).resolves.toBe(false);
     answer({ latestLedger: 1, entries: [] });
     await expect(runsTreasuryCode(DEPLOYED)).resolves.toBe(false);
+  });
+});
+
+describe("readPayeeCaps", () => {
+  it("reads each unique payee's monthly cap and spend for the given month", async () => {
+    const caps: Record<string, bigint> = { GPAYEE1: 500n, GPAYEE2: 0n };
+    const spents: Record<string, bigint> = { "GPAYEE1:24321": 125n, "GPAYEE2:24321": 40n };
+    const fake = {
+      payee_cap: async ({ payee }: { payee: string }) => ({ result: caps[payee] ?? 0n }),
+      payee_spent: async ({ payee, month }: { payee: string; month: number }) => ({
+        result: spents[`${payee}:${month}`] ?? 0n,
+      }),
+    } as unknown as Client;
+
+    const rows = await readPayeeCaps(
+      { client: fake, submit: async () => ({}) },
+      ["GPAYEE1", "GPAYEE2", "GPAYEE1"],
+      24_321,
+    );
+    expect(rows).toEqual([
+      { payee: "GPAYEE1", cap: 500n, spent: 125n },
+      { payee: "GPAYEE2", cap: 0n, spent: 40n },
+    ]);
+  });
+});
+
+describe("escrow helpers", () => {
+  it("returns empty without probing ids when locked balance is 0", async () => {
+    const get_escrow = vi.fn();
+    const fake = {
+      locked: async () => ({ result: 0n }),
+      get_escrow,
+    } as unknown as Client;
+
+    expect(await readOpenEscrows({ client: fake, submit: async () => ({}) })).toEqual({
+      locked: 0n,
+      escrows: [],
+    });
+    expect(get_escrow).not.toHaveBeenCalled();
+  });
+
+  it("scans open escrows until their amounts account for the locked balance", async () => {
+    const entries: Record<string, { payee: string; amount: bigint; task_id: bigint; deadline: bigint }> = {
+      "1": { payee: "GPAYEE1", amount: 100n, task_id: 7n, deadline: 1_800_000_000n },
+      "3": { payee: "GPAYEE2", amount: 250n, task_id: 9n, deadline: 1_800_003_600n },
+    };
+    const probed: bigint[] = [];
+    const fake = {
+      locked: async () => ({ result: 350n }),
+      get_escrow: async ({ id }: { id: bigint }) => {
+        probed.push(id);
+        return { result: entries[id.toString()] };
+      },
+    } as unknown as Client;
+
+    const res = await readOpenEscrows({ client: fake, submit: async () => ({}) });
+    expect(res).toEqual({
+      locked: 350n,
+      escrows: [
+        { id: 1n, payee: "GPAYEE1", amount: 100n, taskId: 7n, deadline: 1_800_000_000n },
+        { id: 3n, payee: "GPAYEE2", amount: 250n, taskId: 9n, deadline: 1_800_003_600n },
+      ],
+    });
+    // Stops right after id 3 reaches the 350n locked total.
+    expect(probed).toEqual([0n, 1n, 2n, 3n]);
+  });
+
+  it("submits admin_cancel_escrow and refund_escrow through the treasury executor", async () => {
+    const fake = {
+      admin_cancel_escrow: vi.fn(async () => ({ signAndSend: async () => ({}) })),
+      refund_escrow: vi.fn(async () => ({ signAndSend: async () => ({}) })),
+    } as unknown as Client;
+    const submit = vi.fn(async () => ({ hash: "tx_escrow" }));
+
+    const cancelled = await adminCancelEscrow({ client: fake, submit }, 3n);
+    expect(cancelled).toEqual({ ok: true, hash: "tx_escrow" });
+    expect(fake.admin_cancel_escrow).toHaveBeenCalledWith({ id: 3n });
+
+    const refunded = await refundEscrow({ client: fake, submit }, 3n);
+    expect(refunded).toEqual({ ok: true, hash: "tx_escrow" });
+    expect(fake.refund_escrow).toHaveBeenCalledWith({ id: 3n });
   });
 });
