@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { rpc } from "@stellar/stellar-sdk";
 import { EXPLORER, RPC_URL, shortAddr } from "../config";
 import { dedupeById, fetchAllEvents, fetchEventsPage, type FeedEvent } from "../lib/events";
-import { fetchActivityHistory, mergeFeedEvents, subscribeActivity } from "../lib/activity";
+import { fetchActivityHistory, fetchTreasuryHistory, mergeFeedEvents, subscribeActivity } from "../lib/activity";
 import { filterFeed, type FeedFilter } from "../lib/feedFilter";
 import { getTreasuryId } from "../lib/treasuryStore";
 import { useWalletAddress } from "../lib/useWalletAddress";
@@ -66,12 +66,20 @@ export default function ActivityFeed({ filter }: { filter?: FeedFilter }) {
       if (stopped) return;
       // Full platform history first — it doesn't depend on the RPC, so the feed paints
       // even when the RPC is down or the chain window has long forgotten the events.
-      const history = await fetchActivityHistory(MAX_ITEMS);
+      let history: FeedEvent[] = [];
+      let historyFailed = false;
+      try {
+        history = filter?.treasuryId
+          ? await fetchTreasuryHistory(filter.treasuryId, { limit: MAX_ITEMS })
+          : await fetchActivityHistory(MAX_ITEMS);
+      } catch {
+        historyFailed = true;
+      }
       if (stopped) return;
       if (history.length) setEvents((prev) => mergeFeedEvents(prev, history, MAX_ITEMS));
       // Nothing on chain to follow yet (no treasury connected): the history is it.
       if (contractIds.length === 0) {
-        setState("live");
+        setState(historyFailed ? "error" : "live");
         return;
       }
       try {
@@ -106,7 +114,7 @@ export default function ActivityFeed({ filter }: { filter?: FeedFilter }) {
       clearTimeout(timer);
       unsubscribe();
     };
-  }, [contractIds]);
+  }, [contractIds, filter?.treasuryId]);
 
   // View-level filter + paging: merge/poll state above stays untouched, so switching
   // chips never refetches — it just re-slices what's already in memory.

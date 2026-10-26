@@ -57,7 +57,7 @@ export default function Overview({ onGo }: { onGo: (v: View) => void }) {
   const t = useTreasury();
   const treasuryId = t.treasuryId as string; // the shell only renders Overview with one open
   const analytics = useAnalyticsScore(treasuryId, t.refreshKey);
-  const { rows: written, freshId } = useTreasuryActivity(treasuryId, t.refreshKey);
+  const { rows: written, freshId, error: historyError, hasMore, loadMore } = useTreasuryActivity(treasuryId, t.refreshKey);
   // One list feeds the verdict, the ledger and the bars — set the unit once, here.
   //
   // The activity log only knows what passed through this app. An agent paying from its own
@@ -276,7 +276,15 @@ export default function Overview({ onGo }: { onGo: (v: View) => void }) {
 
           {/* LEDGER */}
           <motion.div {...fadeUp(0.08)}>
-            <RecentActivity rows={rows} freshId={freshId} week={week} onViewAll={() => onGo("activity")} />
+            <RecentActivity
+              rows={rows}
+              freshId={freshId}
+              week={week}
+              error={historyError}
+              hasMore={hasMore}
+              onLoadMore={loadMore}
+              onViewAll={() => onGo("activity")}
+            />
           </motion.div>
         </div>
 

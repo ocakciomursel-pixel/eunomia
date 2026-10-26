@@ -12,7 +12,7 @@ import { payeeLacksTrustline } from "../lib/receivable";
 import { dedupeRefusals, useAgentRejections } from "../lib/agentRejections";
 import { loadLedger } from "../lib/eventLedger";
 import { loadPayeeBook, mergePayees, payeesFromEvents, rememberPayee, forgetPayee, type PayeeEntry } from "../lib/payees";
-import { fetchActivityHistory, mergeFeedEvents, subscribeActivity } from "../lib/activity";
+import { fetchTreasuryHistory, mergeFeedEvents, subscribeActivity } from "../lib/activity";
 import { filterFeed } from "../lib/feedFilter";
 import type { FeedEvent } from "../lib/events";
 import { amountOf, inToken, verdictOf, whenOf } from "../components/shell/ledgerFormat";
@@ -125,19 +125,47 @@ export default function Payments() {
   };
 
   // ---- the ledger ---------------------------------------------------------------
+  const PAGE_SIZE = 50;
   const [history, setHistory] = useState<FeedEvent[]>([]);
+  const [historyErr, setHistoryErr] = useState<string | null>(null);
+  const [offset, setOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+
+  useEffect(() => {
+    setOffset(0);
+  }, [treasuryId, t.refreshKey]);
+
   useEffect(() => {
     let alive = true;
     (async () => {
-      const rows = await fetchActivityHistory(80);
-      if (alive) setHistory(rows);
+      try {
+        const rows = await fetchTreasuryHistory(treasuryId, {
+          limit: PAGE_SIZE,
+          offset,
+        });
+        if (!alive) return;
+        setHistoryErr(null);
+        setHasMore(rows.length >= PAGE_SIZE);
+        setHistory((prev) =>
+          offset === 0
+            ? rows
+            : mergeFeedEvents(prev, rows, prev.length + rows.length),
+        );
+      } catch (e) {
+        if (!alive) return;
+        setHistoryErr(e instanceof Error ? e.message : "Could not load treasury history.");
+      }
     })();
-    const unsub = subscribeActivity((e) => setHistory((list) => mergeFeedEvents([e], list, 80)));
+    const unsub = subscribeActivity((e) => {
+      const [mine] = filterFeed([e], { groups: null, treasuryId });
+      if (!mine) return;
+      setHistory((list) => mergeFeedEvents([mine], list, list.length + 1));
+    });
     return () => {
       alive = false;
       unsub();
     };
-  }, [treasuryId, t.refreshKey]);
+  }, [treasuryId, t.refreshKey, offset]);
 
   // Payments an agent made from its own machine (eunomia-mcp) never pass through this app, so
   // the activity log has no row for them. The chain does: the treasury emits `paid` for each,
@@ -197,11 +225,17 @@ export default function Payments() {
             <span className="eyebrow sm-hide" style={{ textAlign: "right" }}>Proof</span>
           </div>
           {shown.length === 0 ? (
-            <div className="ledger__empty">
-              {decisions.length === 0
-                ? "No payment tried yet. Put your agent on a Leash and its first attempt lands here — allowed or refused."
-                : "Nothing in this slice."}
-            </div>
+            historyErr ? (
+              <div className="ledger__empty err" role="alert">
+                Could not load payment history: {historyErr}
+              </div>
+            ) : (
+              <div className="ledger__empty">
+                {decisions.length === 0
+                  ? "No payment tried yet. Put your agent on a Leash and its first attempt lands here — allowed or refused."
+                  : "Nothing in this slice."}
+              </div>
+            )
           ) : (
             shown.map((e) => {
               const v = verdictOf(e.kind);
@@ -222,8 +256,21 @@ export default function Payments() {
               );
             })
           )}
-          {decisions.length > shown.length && slice === "all" && (
-            <div className="ledger__more"><span>{decisions.length - shown.length} older on the Activity page</span></div>
+          {(decisions.length > shown.length || hasMore) && slice === "all" && (
+            <div className="ledger__more">
+              {decisions.length > shown.length && (
+                <span>{decisions.length - shown.length} older on the Activity page</span>
+              )}
+              {hasMore && (
+                <button
+                  className="linkbtn"
+                  onClick={() => setOffset((prev) => prev + PAGE_SIZE)}
+                  type="button"
+                >
+                  Load older
+                </button>
+              )}
+            </div>
           )}
         </section>
       </div>

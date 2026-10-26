@@ -14,11 +14,17 @@ export default function RecentActivity({
   rows,
   freshId,
   week,
+  error,
+  hasMore,
+  onLoadMore,
   onViewAll,
 }: {
   rows: FeedEvent[];
   freshId: string | null;
   week?: DayBucket[];
+  error?: string | null;
+  hasMore?: boolean;
+  onLoadMore?: () => void;
   onViewAll: () => void;
 }) {
   const reduce = useReducedMotion();
@@ -49,9 +55,15 @@ export default function RecentActivity({
       </div>
 
       {shown.length === 0 ? (
-        <div className="ledger__empty">
-          Nothing decided yet. The first payment your agent tries lands here — allowed or refused.
-        </div>
+        error ? (
+          <div className="ledger__empty err" role="alert">
+            Could not load treasury history: {error}
+          </div>
+        ) : (
+          <div className="ledger__empty">
+            Nothing decided yet. The first payment your agent tries lands here — allowed or refused.
+          </div>
+        )
       ) : (
         <AnimatePresence initial={false}>
           {shown.map((e, i) => {
@@ -110,6 +122,12 @@ export default function RecentActivity({
               <>
                 {" · "}
                 <button className="linkbtn" onClick={onViewAll} type="button">every decision</button>
+              </>
+            )}
+            {hasMore && onLoadMore && (
+              <>
+                {" · "}
+                <button className="linkbtn" onClick={onLoadMore} type="button">load older</button>
               </>
             )}
           </span>

@@ -70,6 +70,19 @@ export interface ActivityRow {
   created_at: string;
 }
 
+export interface ChainEventRow {
+  id: string;
+  network?: string;
+  ledger?: number;
+  closed_at: string;
+  tx_hash: string;
+  contract_id: string;
+  kind: string;
+  counterparty: string | null;
+  /** Raw 7-decimal token units (stroops) as stored by workers/chain-indexer. */
+  amount: number | string | null;
+}
+
 const shortAddr = (a: string) => (a.length > 10 ? `${a.slice(0, 4)}…${a.slice(-4)}` : a);
 
 /** Map a platform activity row to a feed item (pure, testable). */
@@ -103,6 +116,99 @@ export function activityToFeedEvent(row: ActivityRow): FeedEvent {
   };
 }
 
+/** Map an indexed `chain_events` row to a `FeedEvent` (pure, testable). */
+export function chainEventToFeedEvent(row: ChainEventRow): FeedEvent {
+  const who = row.counterparty ? shortAddr(row.counterparty) : "treasury";
+  const rawAmt = row.amount == null ? null : Number(row.amount);
+  const amt = rawAmt != null && !Number.isNaN(rawAmt) ? rawAmt / 1e7 : null;
+  const amtTxt = amt != null ? ` · ${amt} XLM` : "";
+
+  const map: Record<string, { kind: string; label: string; payee?: string }> = {
+    paid: {
+      kind: "paid",
+      label: amt != null ? `Agent paid ${amt} XLM to ${who}` : `Agent paid ${who}`,
+    },
+    deposit: {
+      kind: "fund",
+      label: `${who} funded a treasury${amtTxt}`,
+    },
+    payee_add: {
+      kind: "whitelist",
+      label: `Payee approved: ${who}`,
+      payee: row.counterparty ?? undefined,
+    },
+    payee_rm: {
+      kind: "payee_rm",
+      label: `Payee removed: ${who}`,
+      payee: row.counterparty ?? undefined,
+    },
+    session: {
+      kind: "leash",
+      label: `Leash started for ${who}${amtTxt}`,
+    },
+    budget: {
+      kind: "leash",
+      label: `Task budget approved for ${who}${amtTxt}`,
+    },
+    revoked: {
+      kind: "revoked",
+      label: "Leash revoked",
+    },
+    withdrawn: {
+      kind: "lifecycle",
+      label: `Withdrew from treasury to ${who}${amtTxt}`,
+    },
+    limits: {
+      kind: "lifecycle",
+      label: `Updated treasury limits${amtTxt}`,
+    },
+    monthly: {
+      kind: "lifecycle",
+      label: `Updated monthly limit${amtTxt}`,
+    },
+    payee_cap: {
+      kind: "lifecycle",
+      label: `Updated monthly cap for ${who}${amtTxt}`,
+    },
+    paused: {
+      kind: "paused",
+      label: "Treasury pause updated",
+    },
+    agent: {
+      kind: "agent",
+      label: `Root agent rotated to ${who}`,
+    },
+    escrowed: {
+      kind: "escrowed",
+      label: `Escrow opened for ${who}${amtTxt}`,
+    },
+    released: {
+      kind: "released",
+      label: `Escrow released to ${who}${amtTxt}`,
+    },
+    refunded: {
+      kind: "refunded",
+      label: "Escrow refunded",
+    },
+    cancelled: {
+      kind: "refunded",
+      label: "Escrow cancelled by owner",
+    },
+  };
+
+  const m = map[row.kind] ?? { kind: row.kind, label: `${who} · ${row.kind}${amtTxt}` };
+  return {
+    id: `ce-${row.id}`,
+    kind: m.kind,
+    label: m.label,
+    txHash: row.tx_hash ?? "",
+    at: row.closed_at,
+    amountXlm: amt ?? undefined,
+    treasuryId: row.contract_id,
+    ...(m.payee ? { payee: m.payee } : {}),
+  };
+}
+
 /** Merge on-chain events (primary — richer labels) with platform rows, newest first.
  *  Duplicates are dropped by tx hash; rows without a hash always survive. Pure. */
 export function mergeFeedEvents(primary: FeedEvent[], secondary: FeedEvent[], cap = 120): FeedEvent[] {
@@ -111,20 +217,99 @@ export function mergeFeedEvents(primary: FeedEvent[], secondary: FeedEvent[], ca
   return merged.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0)).slice(0, cap);
 }
 
-/** Full platform history, newest first (empty when Supabase isn't configured). */
-export async function fetchActivityHistory(limit = 120): Promise<FeedEvent[]> {
-  if (!supabaseConfigured || !supabase) return [];
-  try {
-    const { data, error } = await supabase
+/** Minimal structural shape of a Supabase query builder so unit tests can inject a fake client. */
+export interface SupabaseQueryBuilder<T = unknown> {
+  select: (cols: string) => SupabaseQueryBuilder<T>;
+  eq: (col: string, val: string) => SupabaseQueryBuilder<T>;
+  order: (col: string, opts: { ascending: boolean }) => SupabaseQueryBuilder<T>;
+  limit: (n: number) => PromiseLike<{ data: T[] | null; error: { message?: string } | null }>;
+  range: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message?: string } | null }>;
+}
+
+export interface SupabaseReadClient {
+  from: (table: string) => SupabaseQueryBuilder;
+}
+
+export interface TreasuryHistoryOptions {
+  limit?: number;
+  offset?: number;
+  client?: SupabaseReadClient | null;
+  configured?: boolean;
+}
+
+/** Full platform history, newest first (empty when Supabase isn't configured).
+ *  Throws when the query fails so callers can render an explicit error state. */
+export async function fetchActivityHistory(
+  limit = 120,
+  opts?: TreasuryHistoryOptions,
+): Promise<FeedEvent[]> {
+  const configured = opts?.configured ?? supabaseConfigured;
+  const client = (opts?.client !== undefined ? opts.client : supabase) as SupabaseReadClient | null;
+  if (!configured || !client) return [];
+
+  const offset = Math.max(0, opts?.offset ?? 0);
+  const query = client
+    .from("activity")
+    .select("id,wallet_address,treasury_id,action,tx_hash,amount_xlm,created_at")
+    .order("created_at", { ascending: false });
+
+  const { data, error } =
+    offset > 0
+      ? await query.range(offset, offset + limit - 1)
+      : await query.limit(limit);
+
+  if (error) {
+    throw new Error(error.message || "Could not load activity history.");
+  }
+  if (!data) return [];
+  return (data as ActivityRow[]).map(activityToFeedEvent);
+}
+
+/** Per-treasury history read server-side from `chain_events_public` (and off-chain `activity`
+ *  rows for this treasury), with pagination (`limit` + `offset`).
+ *
+ *  Because filtering happens server-side by `contract_id` / `treasury_id`, an older treasury's
+ *  history remains visible no matter how many newer platform-wide rows arrive. Throws on
+ *  fetch errors instead of returning `[]`. */
+export async function fetchTreasuryHistory(
+  treasuryId: string,
+  opts?: TreasuryHistoryOptions,
+): Promise<FeedEvent[]> {
+  if (!treasuryId) return [];
+  const configured = opts?.configured ?? supabaseConfigured;
+  const client = (opts?.client !== undefined ? opts.client : supabase) as SupabaseReadClient | null;
+  if (!configured || !client) return [];
+
+  const limit = Math.max(1, opts?.limit ?? 50);
+  const offset = Math.max(0, opts?.offset ?? 0);
+  const from = offset;
+  const to = offset + limit - 1;
+
+  const [chainRes, activityRes] = await Promise.all([
+    client
+      .from("chain_events_public")
+      .select("id,closed_at,tx_hash,contract_id,kind,counterparty,amount")
+      .eq("contract_id", treasuryId)
+      .order("closed_at", { ascending: false })
+      .range(from, to),
+    client
       .from("activity")
       .select("id,wallet_address,treasury_id,action,tx_hash,amount_xlm,created_at")
+      .eq("treasury_id", treasuryId)
       .order("created_at", { ascending: false })
-      .limit(limit);
-    if (error || !data) return [];
-    return (data as ActivityRow[]).map(activityToFeedEvent);
-  } catch {
-    return [];
+      .range(from, to),
+  ]);
+
+  if (chainRes.error) {
+    throw new Error(chainRes.error.message || "Could not load treasury history.");
   }
+  if (activityRes.error) {
+    throw new Error(activityRes.error.message || "Could not load treasury history.");
+  }
+
+  const chainEvents = ((chainRes.data ?? []) as ChainEventRow[]).map(chainEventToFeedEvent);
+  const activityEvents = ((activityRes.data ?? []) as ActivityRow[]).map(activityToFeedEvent);
+  return mergeFeedEvents(chainEvents, activityEvents, offset + limit);
 }
 
 /** Live INSERT stream — returns an unsubscribe. No-op when Supabase isn't configured. */
