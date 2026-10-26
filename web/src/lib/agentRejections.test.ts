@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { dedupeRefusals, rejectionsToFeed } from "./agentRejections";
+import { encodeExceptionPayload, refusalEntryName } from "./exceptionCodec";
 import type { FeedEvent } from "./events";
-import type { ExceptionRequest } from "./exceptions";
+import { parseAccountData, type ExceptionRequest } from "./exceptions";
 
 const req = (over: Partial<ExceptionRequest> = {}): ExceptionRequest => ({
   id: "CDVCLLGG.abc",
@@ -85,5 +86,32 @@ describe("dedupeRefusals", () => {
   it("is a no-op when the agent has filed nothing", () => {
     const rows = [ev(), ev({ id: "sb-2" })];
     expect(dedupeRefusals(rows)).toEqual(rows);
+  });
+
+  it("M4 (#39): a refused pay recorded via EUNOMIA_RECORD_REFUSALS appears in the owner's decision ledger without request_exception", () => {
+    const treasuryId = "CDVCLLGGMV6MJSJZYCPJI36BG6SGKSWVD44PORHVVFRBTSACEABBYNJ2";
+    const payee = "GAKSMBN6TRMF4M4PL3FJSDMQRD6XBQCJFLECLYTNAXZYMRIWXT6ADYTC";
+    const entryName = refusalEntryName(treasuryId, 0);
+    const bytes = encodeExceptionPayload({
+      payee,
+      amount: 25_000_000n,
+      taskId: 11n,
+      reasonCodes: [2],
+      requestedAt: 1_758_000_123,
+      refusal: true,
+    });
+    const b64 = btoa(String.fromCharCode(...bytes));
+
+    const parsed = parseAccountData({ [entryName]: b64 }, treasuryId);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].refusal).toBe(true);
+
+    const feed = rejectionsToFeed(parsed, treasuryId);
+    expect(feed).toHaveLength(1);
+    expect(feed[0].id).toBe("x-CDVCLLGG.r0");
+    expect(feed[0].kind).toBe("blocked");
+    expect(feed[0].amountXlm).toBe(2.5);
+    expect(feed[0].label).toContain("Agent payment refused");
+    expect(feed[0].label).toContain("GAKS…DYTC");
   });
 });

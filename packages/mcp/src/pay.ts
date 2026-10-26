@@ -6,6 +6,8 @@ import { rpc } from "@stellar/stellar-sdk";
 import type { Client } from "./bindings/treasury.js";
 import { computeBudget, type Budget, type Reason } from "./budget.js";
 import { contractCodeFromMessage, errText, reasonFromCode, reasonFromErrorName, reasonsFromDiagnostics } from "./errors.js";
+import type { ExceptionPayload } from "./exceptionCodec.js";
+import { recordRefusal as defaultRecordRefusal } from "./exception.js";
 import type { ServerContext } from "./server.js";
 import { lacksTrustline } from "./receiver.js";
 import { diagnosticsOf, makeSigningClient } from "./signer.js";
@@ -29,6 +31,8 @@ export type PayOutcome =
       message: string;
       txHash?: string;
       ledger?: number;
+      refusalId?: string;
+      refusalTxHash?: string;
       to: string;
       amount: bigint;
       taskId: bigint;
@@ -39,6 +43,10 @@ export interface PayDeps {
   signingClient?: Client;
   now?: () => number;
   lacksTrustline?: (tokenId: string, payee: string) => Promise<boolean>;
+  recordRefusal?: (
+    ctx: ServerContext,
+    payload: Omit<ExceptionPayload, "refusal">,
+  ) => Promise<{ id: string; txHash: string }>;
 }
 
 /** The agent's own key is the payee this check catches most: `eunomia-mcp init` funds it
@@ -92,6 +100,37 @@ export async function preflightReasons(
 type Verdict = { isErr(): boolean; unwrapErr(): { message: string } };
 
 export async function payFromTreasury(ctx: ServerContext, args: PayArgs, deps: PayDeps = {}): Promise<PayOutcome> {
+  const outcome = await executePayFromTreasury(ctx, args, deps);
+  if (
+    !outcome.paid &&
+    ctx.recordRefusals &&
+    ctx.credential &&
+    outcome.reasons.length > 0 &&
+    !outcome.reasons.some((r) => r.code === TRUSTLINE_MISSING)
+  ) {
+    try {
+      const now = deps.now ?? ctx.now ?? (() => Math.floor(Date.now() / 1000));
+      const writeRefusal = deps.recordRefusal ?? defaultRecordRefusal;
+      const recorded = await writeRefusal(ctx, {
+        payee: args.to,
+        amount: args.amount,
+        taskId: args.taskId,
+        reasonCodes: outcome.reasons.map((r) => r.code),
+        requestedAt: now(),
+      });
+      return {
+        ...outcome,
+        refusalId: recorded.id,
+        refusalTxHash: recorded.txHash,
+      };
+    } catch {
+      /* best-effort: a recording failure must never mask the refusal verdict */
+    }
+  }
+  return outcome;
+}
+
+async function executePayFromTreasury(ctx: ServerContext, args: PayArgs, deps: PayDeps = {}): Promise<PayOutcome> {
   const treasuryId = requireTreasury(ctx);
   const base = { to: args.to, amount: args.amount, taskId: args.taskId };
   const pre = await preflightReasons(ctx, args, deps);

@@ -3,10 +3,12 @@
 // exact key over the RPC. Closing deletes the entry (and frees its base reserve).
 import { Keypair, Operation, rpc, xdr } from "@stellar/stellar-sdk";
 import {
+  REFUSAL_SLOTS,
   decodeExceptionPayload,
   encodeExceptionPayload,
   exceptionEntryName,
   exceptionIdOf,
+  refusalEntryName,
   type ExceptionPayload,
 } from "./exceptionCodec.js";
 import type { NetworkConfig } from "./network.js";
@@ -31,6 +33,29 @@ export async function submitException(
   const op = Operation.manageData({ name, value: Buffer.from(encodeExceptionPayload(payload)) });
   const res = await submitClassic(ctx.net, agentKeypair(ctx.credential), [op], deps);
   if (res.status !== "SUCCESS") throw new Error(`the request transaction failed on-chain (${res.txHash})`);
+  return { id: exceptionIdOf(name), name, txHash: res.txHash, ledger: res.ledger };
+}
+
+let nextRefusalSlot = 0;
+
+/** Write a passive refusal record into a bounded 4-slot rolling entry (`eunomia.x.<t8>.r<0..3>`)
+ *  when `EUNOMIA_RECORD_REFUSALS` is enabled, so the owner's decision ledger shows the refusal
+ *  without a separate `request_exception` call and without locking unbounded 0.5 XLM reserves. */
+export async function recordRefusal(
+  ctx: ServerContext,
+  payload: Omit<ExceptionPayload, "refusal">,
+  deps: ClassicDeps & { slot?: number } = {},
+): Promise<{ id: string; name: string; txHash: string; ledger: number }> {
+  const treasuryId = requireTreasury(ctx);
+  if (!ctx.credential) throw new Error("No agent credential — run `eunomia-mcp init` first.");
+  const slot = deps.slot ?? nextRefusalSlot++ % REFUSAL_SLOTS;
+  const name = refusalEntryName(treasuryId, slot);
+  const op = Operation.manageData({
+    name,
+    value: Buffer.from(encodeExceptionPayload({ ...payload, refusal: true })),
+  });
+  const res = await submitClassic(ctx.net, agentKeypair(ctx.credential), [op], deps);
+  if (res.status !== "SUCCESS") throw new Error(`the refusal record transaction failed on-chain (${res.txHash})`);
   return { id: exceptionIdOf(name), name, txHash: res.txHash, ledger: res.ledger };
 }
 

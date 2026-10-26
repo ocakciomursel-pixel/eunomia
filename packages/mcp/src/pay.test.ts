@@ -5,7 +5,7 @@ import { Err, Ok } from "@stellar/stellar-sdk/contract";
 import { memoryCache } from "./cache.js";
 import { NETWORKS } from "./network.js";
 import { payFromTreasury, preflightReasons } from "./pay.js";
-import type { ServerContext } from "./server.js";
+import { isRecordRefusalsEnabled, type ServerContext } from "./server.js";
 import { memoryExceptionStore } from "./store.js";
 import { serializeOutcome } from "./tools.js";
 
@@ -316,4 +316,67 @@ test("pre-v4 treasuries read without any of the v4 limits", async () => {
   );
   assert.equal(pre.budget.monthly, null);
   assert.deepEqual(pre.budget.taskPayees, []);
+});
+
+test("M4 (#39): with EUNOMIA_RECORD_REFUSALS enabled, a policy-refused pay records the refusal automatically", async () => {
+  assert.equal(isRecordRefusalsEnabled({ EUNOMIA_RECORD_REFUSALS: "1" }), true);
+  assert.equal(isRecordRefusalsEnabled({ EUNOMIA_RECORD_REFUSALS: "true" }), true);
+  assert.equal(isRecordRefusalsEnabled({ EUNOMIA_RECORD_REFUSALS: "0" }), false);
+  assert.equal(isRecordRefusalsEnabled({}), false);
+
+  const signing = {
+    pay: async () => ({
+      simulation: {
+        error: "HostError: Error(Contract, #2)",
+      },
+      result: new Err({ message: "" }),
+      signAndSend: async () => {
+        throw new Error("must not send");
+      },
+    }),
+  } as never;
+
+  const recorded: Array<{ payee: string; amount: bigint; taskId: bigint; reasonCodes: number[]; requestedAt: number }> = [];
+  const out = await payFromTreasury(
+    ctx({ recordRefusals: true }),
+    { to: "GPAYEE", amount: 50_000_000n, taskId: 9n },
+    {
+      readClient: readClient({ is_payee: () => Promise.resolve({ result: false }) }),
+      signingClient: signing,
+      lacksTrustline: async () => false,
+      recordRefusal: async (_c, p) => {
+        recorded.push(p);
+        return { id: "CTREASUR.r0", txHash: "refusal-tx-hash" };
+      },
+    },
+  );
+
+  assert.equal(out.paid, false);
+  assert.equal(recorded.length, 1);
+  assert.deepEqual(recorded[0], {
+    payee: "GPAYEE",
+    amount: 50_000_000n,
+    taskId: 9n,
+    reasonCodes: [2],
+    requestedAt: NOW,
+  });
+  if (!out.paid) {
+    assert.equal(out.refusalId, "CTREASUR.r0");
+    assert.equal(out.refusalTxHash, "refusal-tx-hash");
+  }
+
+  // With recordRefusals off (default), nothing is written on a refused pay.
+  const outOff = await payFromTreasury(
+    ctx({ recordRefusals: false }),
+    { to: "GPAYEE", amount: 50_000_000n, taskId: 9n },
+    {
+      readClient: readClient({ is_payee: () => Promise.resolve({ result: false }) }),
+      signingClient: signing,
+      lacksTrustline: async () => false,
+      recordRefusal: async () => {
+        throw new Error("must not record when EUNOMIA_RECORD_REFUSALS is off");
+      },
+    },
+  );
+  assert.equal(outOff.paid, false);
 });

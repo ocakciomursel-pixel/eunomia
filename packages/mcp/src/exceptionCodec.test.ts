@@ -2,11 +2,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   EXCEPTION_PAYLOAD_BYTES,
+  REFUSAL_SLOTS,
   decodeExceptionPayload,
   encodeExceptionPayload,
   exceptionEntryName,
   exceptionIdOf,
   isExceptionEntryFor,
+  refusalEntryName,
 } from "./exceptionCodec.js";
 
 const T = "CDVCLLGGMV6MJSJZYCPJI36BG6SGKSWVD44PORHVVFRBTSACEABBYNJ2";
@@ -36,4 +38,25 @@ test("entry names are scoped to the treasury and stay under 64 bytes", () => {
   assert.equal(isExceptionEntryFor(name, T), true);
   assert.equal(isExceptionEntryFor(name, "CAAAAAAA" + T.slice(8)), false);
   assert.equal("eunomia.x." + exceptionIdOf(name), name);
+});
+
+test("passive refusal flag round-trips and rolling refusal slots stay bounded", () => {
+  const p = {
+    payee: G,
+    amount: 25_000_000n,
+    taskId: 7n,
+    reasonCodes: [2, 3],
+    requestedAt: 1_758_000_000,
+    refusal: true,
+  };
+  const bytes = encodeExceptionPayload(p);
+  assert.equal(bytes.length, EXCEPTION_PAYLOAD_BYTES);
+  assert.deepEqual(decodeExceptionPayload(bytes), p);
+
+  const slots = new Set(Array.from({ length: 12 }, (_, i) => refusalEntryName(T, i)));
+  assert.equal(slots.size, REFUSAL_SLOTS);
+  for (const name of slots) {
+    assert.equal(isExceptionEntryFor(name, T), true);
+    assert.ok(Buffer.byteLength(name) <= 64);
+  }
 });

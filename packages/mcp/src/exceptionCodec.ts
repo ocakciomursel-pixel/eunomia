@@ -8,6 +8,7 @@ import { StrKey } from "@stellar/stellar-sdk";
 export const EXCEPTION_PREFIX = "eunomia.x.";
 export const EXCEPTION_VERSION = 1;
 export const EXCEPTION_PAYLOAD_BYTES = 56;
+export const REFUSAL_SLOTS = 4;
 
 // Layout (big-endian):
 //   [0]      version
@@ -15,7 +16,7 @@ export const EXCEPTION_PAYLOAD_BYTES = 56;
 //   [2..34)  payee, 32 raw bytes
 //   [34..42) amount, u64 stroops
 //   [42..50) task id, u64
-//   [50..52) reason mask, u16 — bit N set = contract error code N
+//   [50..52) reason mask, u16 — bit 0 = passive refusal flag, bit N (1..15) = contract error code N
 //   [52..56) requested at, u32 unix seconds
 
 export interface ExceptionPayload {
@@ -27,12 +28,19 @@ export interface ExceptionPayload {
   reasonCodes: number[];
   /** unix seconds */
   requestedAt: number;
+  /** true when written automatically on a refused pay (EUNOMIA_RECORD_REFUSALS) */
+  refusal?: boolean;
 }
 
 /** `eunomia.x.<first 8 of the treasury id>.<ms in base36>` — scoped per treasury,
  *  unique per request, well under the 64-byte name limit. */
 export const exceptionEntryName = (treasuryId: string, requestedAtMs: number): string =>
   `${EXCEPTION_PREFIX}${treasuryId.slice(0, 8)}.${requestedAtMs.toString(36)}`;
+
+/** `eunomia.x.<first 8 of the treasury id>.r<0..3>` — bounded rolling slots for passive
+ *  refusal records so `EUNOMIA_RECORD_REFUSALS` never locks unbounded 0.5 XLM reserves. */
+export const refusalEntryName = (treasuryId: string, slot = 0): string =>
+  `${EXCEPTION_PREFIX}${treasuryId.slice(0, 8)}.r${((slot % REFUSAL_SLOTS) + REFUSAL_SLOTS) % REFUSAL_SLOTS}`;
 
 export const exceptionIdOf = (name: string): string => name.slice(EXCEPTION_PREFIX.length);
 
@@ -54,7 +62,7 @@ export function encodeExceptionPayload(p: ExceptionPayload): Uint8Array {
   }
   view.setBigUint64(34, p.amount);
   view.setBigUint64(42, p.taskId);
-  let mask = 0;
+  let mask = p.refusal ? 1 : 0;
   for (const c of p.reasonCodes) if (c >= 1 && c <= 15) mask |= 1 << c;
   view.setUint16(50, mask);
   view.setUint32(52, p.requestedAt);
@@ -72,6 +80,7 @@ export function decodeExceptionPayload(bytes: Uint8Array): ExceptionPayload {
   const raw = Buffer.from(bytes.subarray(2, 34));
   const payee = bytes[1] === 1 ? StrKey.encodeContract(raw) : StrKey.encodeEd25519PublicKey(raw);
   const mask = view.getUint16(50);
+  const refusal = (mask & 1) !== 0;
   const reasonCodes: number[] = [];
   for (let c = 1; c <= 15; c++) if (mask & (1 << c)) reasonCodes.push(c);
   return {
@@ -80,5 +89,6 @@ export function decodeExceptionPayload(bytes: Uint8Array): ExceptionPayload {
     taskId: view.getBigUint64(42),
     reasonCodes,
     requestedAt: view.getUint32(52),
+    ...(refusal ? { refusal: true } : {}),
   };
 }

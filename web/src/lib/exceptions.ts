@@ -16,6 +16,8 @@ export interface ExceptionRequest {
   reasonCodes: number[];
   /** unix seconds */
   requestedAt: number;
+  /** true when recorded automatically on a refused pay (EUNOMIA_RECORD_REFUSALS) */
+  refusal?: boolean;
 }
 
 const fromBase64 = (s: string): Uint8Array => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));

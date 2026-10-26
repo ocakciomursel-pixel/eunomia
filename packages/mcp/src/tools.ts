@@ -109,6 +109,10 @@ export function serializeOutcome(o: PayOutcome, net: NetworkName, unit: string |
     ...(policyRefusal && {
       note: "This refusal is the treasury's policy working — the same rule the contract enforces on-chain.",
     }),
+    ...(o.refusalId && {
+      refusalId: o.refusalId,
+      refusalTxHash: o.refusalTxHash,
+    }),
   };
 }
 

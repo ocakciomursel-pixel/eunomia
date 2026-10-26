@@ -33,7 +33,7 @@ export default function ExceptionRequests({ agent }: { agent: string }) {
     const client = new Client({ contractId: treasuryId, networkPassphrase: NETWORK_PASSPHRASE, rpcUrl: RPC_URL });
     (async () => {
       try {
-        const reqs = await fetchAgentExceptions(agent, treasuryId);
+        const reqs = (await fetchAgentExceptions(agent, treasuryId)).filter((r) => !r.refusal);
         const withPayee = await Promise.all(
           reqs.map(async (r) => {
             let payeeAllowed = false;
